@@ -131,6 +131,38 @@ function getMetadataBookingId(paymentIntent: Stripe.PaymentIntent): string | nul
     : null;
 }
 
+function getRefundMetadataBookingId(refund: Stripe.Refund): string | null {
+  const bookingId = refund.metadata?.booking_id;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    bookingId ?? ""
+  )
+    ? (bookingId ?? null)
+    : null;
+}
+
+function mapStripeRefundStatus(
+  status: Stripe.Refund["status"]
+):
+  | "pending"
+  | "requires_action"
+  | "succeeded"
+  | "failed"
+  | "cancelled" {
+  if (status === "requires_action") {
+    return "requires_action";
+  }
+  if (status === "succeeded") {
+    return "succeeded";
+  }
+  if (status === "failed") {
+    return "failed";
+  }
+  if (status === "canceled") {
+    return "cancelled";
+  }
+  return "pending";
+}
+
 export const paymentsService = {
   async createCheckoutSession(
     userId: string,
@@ -354,7 +386,9 @@ export const paymentsService = {
       event.type !== "checkout.session.completed" &&
       event.type !== "checkout.session.expired" &&
       event.type !== "payment_intent.succeeded" &&
-      event.type !== "payment_intent.payment_failed"
+      event.type !== "payment_intent.payment_failed" &&
+      event.type !== "refund.updated" &&
+      event.type !== "charge.refunded"
     ) {
       return;
     }
@@ -367,6 +401,69 @@ export const paymentsService = {
         event
       );
       if (!claimed) {
+        return;
+      }
+
+      if (event.type === "refund.updated") {
+        const refund = event.data.object;
+        const refundRecord = await paymentsRepository.findRefundForWebhook(
+          client,
+          refund.id,
+          getRefundMetadataBookingId(refund)
+        );
+        if (!refundRecord) {
+          console.warn(`Stripe refund ${refund.id} has no local refund record`);
+          return;
+        }
+
+        await paymentsRepository.attachPaymentEventToBooking(
+          client,
+          event.id,
+          refundRecord.booking_id
+        );
+        await paymentsRepository.updateRefundWebhookStatus(
+          client,
+          refundRecord.id,
+          refund.id,
+          mapStripeRefundStatus(refund.status),
+          refund.failure_reason ?? null
+        );
+        return;
+      }
+
+      if (event.type === "charge.refunded") {
+        const charge = event.data.object;
+        const paymentIntentId =
+          typeof charge.payment_intent === "string"
+            ? charge.payment_intent
+            : charge.payment_intent?.id;
+        if (!paymentIntentId) {
+          console.warn(`Refunded Stripe charge ${charge.id} has no payment intent`);
+          return;
+        }
+
+        const refundRecord =
+          await paymentsRepository.findRefundByPaymentIntentForUpdate(
+            client,
+            paymentIntentId
+          );
+        if (!refundRecord) {
+          console.warn(
+            `Refunded Stripe charge ${charge.id} has no local refund record`
+          );
+          return;
+        }
+
+        await paymentsRepository.attachPaymentEventToBooking(
+          client,
+          event.id,
+          refundRecord.booking_id
+        );
+        await paymentsRepository.markRefundSucceededFromCharge(
+          client,
+          refundRecord.id,
+          charge.amount_refunded
+        );
         return;
       }
 

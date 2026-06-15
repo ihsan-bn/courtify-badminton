@@ -135,7 +135,7 @@ forward supported events to the API:
 
 ```bash
 stripe listen \
-  --events checkout.session.completed,checkout.session.expired,payment_intent.succeeded,payment_intent.payment_failed \
+  --events checkout.session.completed,checkout.session.expired,payment_intent.succeeded,payment_intent.payment_failed,refund.updated,charge.refunded \
   --forward-to localhost:3001/api/payments/webhook
 ```
 
@@ -150,6 +150,8 @@ Trigger the recovery events:
 ```bash
 stripe trigger checkout.session.expired
 stripe trigger payment_intent.payment_failed
+stripe trigger refund.updated
+stripe trigger charge.refunded
 ```
 
 The generated event validates forwarding, signature verification, and event
@@ -198,7 +200,7 @@ curl "http://localhost:3001/api/admin/bookings?status=confirmed&court_id=1000000
   -H "Authorization: Bearer ADMIN_ACCESS_TOKEN"
 ```
 
-Request cancellation of a confirmed booking:
+Cancel a confirmed booking:
 
 ```bash
 curl -X POST http://localhost:3001/api/bookings/BOOKING_ID/cancel \
@@ -207,12 +209,22 @@ curl -X POST http://localhost:3001/api/bookings/BOOKING_ID/cancel \
   -d '{"reason":"Unable to attend"}'
 ```
 
-Cancellation is allowed only at least 24 hours before the reservation starts.
-The booking remains as an audit record with status `cancellation_requested`,
-while its hourly slot rows are deleted atomically so the court becomes
-immediately available for another booking. Refund handling remains manual.
+Customers can cancel only their own bookings. Administrators using an admin
+access token can cancel any confirmed booking through the same endpoint.
 
-List cancellation requests as an administrator:
+When cancellation occurs at least 24 hours before the reservation starts, the
+server submits a full Stripe refund using the stored PaymentIntent and
+database-authoritative BND amount. Stripe and database idempotency prevent
+duplicate refunds. Later cancellations receive no refund. In both cases the
+booking becomes `cancelled` and its hourly slot rows are deleted atomically so
+the court becomes immediately available.
+
+Verified `refund.updated` and `charge.refunded` webhooks update the associated
+`refund_records` row and are stored idempotently in `payment_events`. Apply the
+`202606150002_create_refund_records.sql` migration before enabling automated
+refunds.
+
+List legacy manual cancellation requests as an administrator:
 
 ```bash
 curl http://localhost:3001/api/admin/cancellation-requests \
@@ -260,8 +272,10 @@ curl -X POST http://localhost:3001/api/bookings/lock \
 3. Repeat the same lock request. It must return HTTP `409`.
 4. After the 10-minute lock expires and cleanup runs, availability must show
    the slots as available and the parent booking must have status `expired`.
-5. For a confirmed booking at least 24 hours away, request cancellation and
-   verify the deleted slot rows make the hours immediately available again.
+5. For a confirmed booking at least 24 hours away, cancel it and verify the
+   full refund record is created and the deleted slots become available.
+6. Cancel a confirmed booking less than 24 hours away and verify no refund is
+   created while the slots are still released.
 
 Expired locks are ignored by availability even before cleanup. Cleanup runs
 once at startup and periodically thereafter, deleting only slots belonging to

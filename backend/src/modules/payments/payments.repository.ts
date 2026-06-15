@@ -23,6 +23,12 @@ export interface WebhookBookingRecord {
   lock_expires_at: Date | null;
 }
 
+export interface WebhookRefundRecord {
+  id: string;
+  booking_id: string;
+  amount_bnd: string;
+}
+
 export const paymentsRepository = {
   async findBookingForCheckout(
     client: PoolClient,
@@ -198,6 +204,84 @@ export const paymentsRepository = {
     );
 
     return result.rows[0] ?? null;
+  },
+
+  async findRefundForWebhook(
+    client: PoolClient,
+    stripeRefundId: string,
+    metadataBookingId: string | null
+  ): Promise<WebhookRefundRecord | null> {
+    const result = await queryWithClient<WebhookRefundRecord>(
+      client,
+      `
+        select id, booking_id, amount_bnd
+        from public.refund_records
+        where stripe_refund_id = $1
+          or ($2::uuid is not null and booking_id = $2)
+        order by (stripe_refund_id = $1) desc
+        limit 1
+        for update
+      `,
+      [stripeRefundId, metadataBookingId]
+    );
+
+    return result.rows[0] ?? null;
+  },
+
+  async findRefundByPaymentIntentForUpdate(
+    client: PoolClient,
+    paymentIntentId: string
+  ): Promise<WebhookRefundRecord | null> {
+    const result = await queryWithClient<WebhookRefundRecord>(
+      client,
+      `
+        select id, booking_id, amount_bnd
+        from public.refund_records
+        where stripe_payment_intent_id = $1
+        for update
+      `,
+      [paymentIntentId]
+    );
+
+    return result.rows[0] ?? null;
+  },
+
+  async updateRefundWebhookStatus(
+    client: PoolClient,
+    refundRecordId: string,
+    stripeRefundId: string,
+    status: string,
+    failureReason: string | null
+  ): Promise<void> {
+    await queryWithClient(
+      client,
+      `
+        update public.refund_records
+        set stripe_refund_id = $2,
+            status = $3,
+            failure_reason = $4
+        where id = $1
+      `,
+      [refundRecordId, stripeRefundId, status, failureReason]
+    );
+  },
+
+  async markRefundSucceededFromCharge(
+    client: PoolClient,
+    refundRecordId: string,
+    amountRefundedCents: number
+  ): Promise<void> {
+    await queryWithClient(
+      client,
+      `
+        update public.refund_records
+        set status = 'succeeded',
+            failure_reason = null
+        where id = $1
+          and round(amount_bnd * 100)::integer <= $2
+      `,
+      [refundRecordId, amountRefundedCents]
+    );
   },
 
   async deleteLockedBookingSlots(

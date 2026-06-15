@@ -56,12 +56,10 @@ export const cancelBooking: RequestHandler = async (request, response) => {
   if (!authenticatedUser) {
     throw new UnauthorizedError();
   }
-  if (authenticatedUser.role !== "customer") {
-    throw new ForbiddenError("Customer access required");
-  }
 
   const result = await bookingsService.cancelBooking(
     authenticatedUser.id,
+    authenticatedUser.role === "admin",
     request.params.bookingId as string,
     request.body as CancelBookingInput
   );

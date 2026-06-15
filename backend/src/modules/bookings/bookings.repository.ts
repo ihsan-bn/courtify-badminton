@@ -58,14 +58,21 @@ export interface CancellableBookingRecord {
   user_id: string;
   status: BookingStatus;
   reservation_start_at: Date;
+  total_amount_bnd: string;
+  stripe_payment_intent_id: string | null;
 }
 
-export interface CancellationRequestRecord {
+export interface RefundRecord {
   id: string;
   booking_id: string;
-  user_id: string;
-  reason: string | null;
-  status: "pending_admin_review";
+  stripe_refund_id: string | null;
+  amount_bnd: string;
+  status:
+    | "pending"
+    | "requires_action"
+    | "succeeded"
+    | "failed"
+    | "cancelled";
   created_at: Date;
 }
 
@@ -388,7 +395,13 @@ export const bookingsRepository = {
     const result = await queryWithClient<CancellableBookingRecord>(
       client,
       `
-        select id, user_id, status, reservation_start_at
+        select
+          id,
+          user_id,
+          status,
+          reservation_start_at,
+          total_amount_bnd,
+          stripe_payment_intent_id
         from public.bookings
         where id = $1
         for update
@@ -399,36 +412,88 @@ export const bookingsRepository = {
     return result.rows[0] ?? null;
   },
 
-  async createCancellationRequest(
+  async findRefundByBooking(
     client: PoolClient,
-    bookingId: string,
-    userId: string,
-    reason: string | null
-  ): Promise<CancellationRequestRecord> {
-    const result = await queryWithClient<CancellationRequestRecord>(
+    bookingId: string
+  ): Promise<RefundRecord | null> {
+    const result = await queryWithClient<RefundRecord>(
       client,
       `
-        insert into public.cancellation_requests (
+        select
+          id,
           booking_id,
-          user_id,
-          reason,
-          status
-        )
-        values ($1, $2, $3, 'pending_admin_review')
-        returning id, booking_id, user_id, reason, status, created_at
+          stripe_refund_id,
+          amount_bnd,
+          status,
+          created_at
+        from public.refund_records
+        where booking_id = $1
       `,
-      [bookingId, userId, reason]
+      [bookingId]
     );
 
-    const cancellationRequest = result.rows[0];
-    if (!cancellationRequest) {
-      throw new Error("Cancellation request insert did not return a row");
-    }
-
-    return cancellationRequest;
+    return result.rows[0] ?? null;
   },
 
-  async markBookingCancellationRequested(
+  async createPendingRefund(
+    client: PoolClient,
+    bookingId: string,
+    requestedBy: string,
+    paymentIntentId: string,
+    amountBnd: string
+  ): Promise<RefundRecord> {
+    const result = await queryWithClient<RefundRecord>(
+      client,
+      `
+        insert into public.refund_records (
+          booking_id,
+          requested_by,
+          stripe_payment_intent_id,
+          amount_bnd,
+          status
+        )
+        values ($1, $2, $3, $4::numeric(10, 2), 'pending')
+        on conflict (booking_id) do update
+          set booking_id = excluded.booking_id
+        returning
+          id,
+          booking_id,
+          stripe_refund_id,
+          amount_bnd,
+          status,
+          created_at
+      `,
+      [bookingId, requestedBy, paymentIntentId, amountBnd]
+    );
+
+    const refund = result.rows[0];
+    if (!refund) {
+      throw new Error("Refund insert did not return a row");
+    }
+    return refund;
+  },
+
+  async updateRefundFromStripe(
+    client: PoolClient,
+    refundId: string,
+    stripeRefundId: string,
+    status: RefundRecord["status"],
+    failureReason: string | null
+  ): Promise<void> {
+    await queryWithClient(
+      client,
+      `
+        update public.refund_records
+        set stripe_refund_id = $2,
+            status = $3,
+            failure_reason = $4
+        where id = $1
+      `,
+      [refundId, stripeRefundId, status, failureReason]
+    );
+  },
+
+  async markBookingCancelled(
     client: PoolClient,
     bookingId: string
   ): Promise<void> {
@@ -436,9 +501,10 @@ export const bookingsRepository = {
       client,
       `
         update public.bookings
-        set status = 'cancellation_requested',
+        set status = 'cancelled',
             lock_expires_at = null
         where id = $1
+          and status = 'confirmed'
       `,
       [bookingId]
     );
@@ -453,7 +519,7 @@ export const bookingsRepository = {
       client,
       `
         update public.booking_slots
-        set status = 'cancellation_requested'
+        set status = 'cancelled'
         where booking_id = $1
       `,
       [bookingId]

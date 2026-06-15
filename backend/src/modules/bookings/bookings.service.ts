@@ -1,7 +1,10 @@
 import { DatabaseError } from "pg";
+import type Stripe from "stripe";
 
 import { withTransaction } from "../../config/database.js";
+import { stripe } from "../../config/stripe.js";
 import {
+  AppError,
   ConflictError,
   ForbiddenError,
   NotFoundError
@@ -68,12 +71,21 @@ interface AdminBookingHistoryItem extends CustomerBookingHistoryItem {
 }
 
 interface CancellationResult {
-  cancellation_request_id: string;
   booking_id: string;
-  status: "cancellation_requested";
-  cancellation_request_status: "pending_admin_review";
+  status: "cancelled";
+  refund_eligible: boolean;
+  refund: {
+    refund_id: string;
+    stripe_refund_id: string | null;
+    amount_bnd: string;
+    status:
+      | "pending"
+      | "requires_action"
+      | "succeeded"
+      | "failed"
+      | "cancelled";
+  } | null;
   reason: string | null;
-  created_at: string;
 }
 
 interface AdminCancellationRequestResult {
@@ -102,6 +114,42 @@ function isSlotConflict(error: unknown): boolean {
     error.code === "23505" &&
     error.constraint === "booking_slots_court_date_hour_key"
   );
+}
+
+function convertBndToCents(amount: string): number {
+  const match = /^(\d{1,8})\.(\d{2})$/.exec(amount);
+  if (!match) {
+    throw new Error("Stored booking amount has an invalid format");
+  }
+
+  const totalCents = Number(match[1]) * 100 + Number(match[2]);
+  if (!Number.isSafeInteger(totalCents) || totalCents < 1) {
+    throw new Error("Stored booking amount is outside the supported range");
+  }
+  return totalCents;
+}
+
+function mapStripeRefundStatus(
+  status: Stripe.Refund["status"]
+):
+  | "pending"
+  | "requires_action"
+  | "succeeded"
+  | "failed"
+  | "cancelled" {
+  if (status === "requires_action") {
+    return "requires_action";
+  }
+  if (status === "succeeded") {
+    return "succeeded";
+  }
+  if (status === "failed") {
+    return "failed";
+  }
+  if (status === "canceled") {
+    return "cancelled";
+  }
+  return "pending";
 }
 
 function formatResult(
@@ -324,67 +372,126 @@ export const bookingsService = {
   },
 
   async cancelBooking(
-    userId: string,
+    actorUserId: string,
+    isAdmin: boolean,
     bookingId: string,
     input: CancelBookingInput
   ): Promise<CancellationResult> {
-    try {
-      return await withTransaction(async (client) => {
-        const booking = await bookingsRepository.findBookingForCancellation(
-          client,
-          bookingId
-        );
+    return withTransaction(async (client) => {
+      const booking = await bookingsRepository.findBookingForCancellation(
+        client,
+        bookingId
+      );
 
-        if (!booking) {
-          throw new NotFoundError("Booking not found");
-        }
-        if (booking.user_id !== userId) {
-          throw new ForbiddenError("Booking belongs to another customer");
-        }
-        if (booking.status !== "confirmed") {
-          throw new ConflictError("Only confirmed bookings can be cancelled");
-        }
-        if (
-          booking.reservation_start_at.getTime() <
-          Date.now() + 24 * 60 * 60 * 1000
-        ) {
-          throw new ConflictError(
-            "Cancellation requires at least 24 hours notice"
-          );
-        }
+      if (!booking) {
+        throw new NotFoundError("Booking not found");
+      }
+      if (!isAdmin && booking.user_id !== actorUserId) {
+        throw new ForbiddenError("Booking belongs to another customer");
+      }
 
-        // Insert while the booking is confirmed to satisfy the DB trigger.
-        const cancellationRequest =
-          await bookingsRepository.createCancellationRequest(
-            client,
-            bookingId,
-            userId,
-            input.reason ?? null
-          );
-
-        await bookingsRepository.markBookingCancellationRequested(
-          client,
-          bookingId
-        );
-        await bookingsRepository.releaseBookingSlots(client, bookingId);
-
+      const existingRefund = await bookingsRepository.findRefundByBooking(
+        client,
+        bookingId
+      );
+      if (booking.status === "cancelled") {
         return {
-          cancellation_request_id: cancellationRequest.id,
-          booking_id: cancellationRequest.booking_id,
-          status: "cancellation_requested",
-          cancellation_request_status: cancellationRequest.status,
-          reason: cancellationRequest.reason,
-          created_at: cancellationRequest.created_at.toISOString()
+          booking_id: booking.id,
+          status: "cancelled",
+          refund_eligible: existingRefund !== null,
+          refund: existingRefund
+            ? {
+                refund_id: existingRefund.id,
+                stripe_refund_id: existingRefund.stripe_refund_id,
+                amount_bnd: existingRefund.amount_bnd,
+                status: existingRefund.status
+              }
+            : null,
+          reason: input.reason ?? null
         };
-      });
-    } catch (error) {
-      if (error instanceof DatabaseError && error.code === "23514") {
-        throw new ConflictError(
-          "Booking is no longer eligible for cancellation"
+      }
+      if (booking.status !== "confirmed") {
+        throw new ConflictError("Only confirmed bookings can be cancelled");
+      }
+      if (!booking.stripe_payment_intent_id) {
+        console.error(
+          `Confirmed booking ${booking.id} has no Stripe payment intent`
+        );
+        throw new AppError(
+          409,
+          "PAYMENT_NOT_VERIFIED",
+          "The booking payment cannot be verified"
         );
       }
-      throw error;
-    }
+
+      const refundEligible =
+        booking.reservation_start_at.getTime() >=
+        Date.now() + 24 * 60 * 60 * 1000;
+      let refundResult: CancellationResult["refund"] = null;
+
+      if (refundEligible) {
+        const refundRecord =
+          existingRefund ??
+          (await bookingsRepository.createPendingRefund(
+            client,
+            booking.id,
+            actorUserId,
+            booking.stripe_payment_intent_id,
+            booking.total_amount_bnd
+          ));
+
+        let stripeRefund: Stripe.Refund;
+        try {
+          stripeRefund = await stripe.refunds.create(
+            {
+              payment_intent: booking.stripe_payment_intent_id,
+              amount: convertBndToCents(booking.total_amount_bnd),
+              metadata: {
+                booking_id: booking.id,
+                requested_by: actorUserId
+              }
+            },
+            { idempotencyKey: `booking-refund:${booking.id}` }
+          );
+        } catch (error) {
+          console.error(
+            `Stripe refund request failed for booking ${booking.id}`,
+            error
+          );
+          throw new AppError(
+            502,
+            "REFUND_PROVIDER_ERROR",
+            "Unable to process the refund at this time"
+          );
+        }
+
+        const refundStatus = mapStripeRefundStatus(stripeRefund.status);
+        await bookingsRepository.updateRefundFromStripe(
+          client,
+          refundRecord.id,
+          stripeRefund.id,
+          refundStatus,
+          stripeRefund.failure_reason ?? null
+        );
+        refundResult = {
+          refund_id: refundRecord.id,
+          stripe_refund_id: stripeRefund.id,
+          amount_bnd: refundRecord.amount_bnd,
+          status: refundStatus
+        };
+      }
+
+      await bookingsRepository.markBookingCancelled(client, booking.id);
+      await bookingsRepository.releaseBookingSlots(client, booking.id);
+
+      return {
+        booking_id: booking.id,
+        status: "cancelled",
+        refund_eligible: refundEligible,
+        refund: refundResult,
+        reason: input.reason ?? null
+      };
+    });
   },
 
   async getCancellationRequests(): Promise<
