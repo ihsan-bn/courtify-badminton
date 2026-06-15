@@ -9,7 +9,13 @@ import {
 } from "./middleware/errorHandler.js";
 import { globalRateLimiter } from "./middleware/rateLimit.js";
 import { requestLogger } from "./middleware/requestLogger.js";
+import { availabilityRouter } from "./modules/availability/availability.routes.js";
 import { authRouter } from "./modules/auth/auth.routes.js";
+import {
+  adminBookingsRouter,
+  adminCancellationRequestsRouter,
+  bookingsRouter
+} from "./modules/bookings/bookings.routes.js";
 import {
   adminCourtsRouter,
   publicCourtsRouter
@@ -48,7 +54,14 @@ app.use("/health", healthRouter);
 app.use("/api/auth", authRouter);
 app.use("/api/me", usersRouter);
 app.use("/api/courts", publicCourtsRouter);
+app.use("/api/availability", availabilityRouter);
+app.use("/api/bookings", bookingsRouter);
 app.use("/api/admin/courts", adminCourtsRouter);
+app.use("/api/admin/bookings", adminBookingsRouter);
+app.use(
+  "/api/admin/cancellation-requests",
+  adminCancellationRequestsRouter
+);
 
 app.use(notFoundHandler);
 app.use(errorHandler);

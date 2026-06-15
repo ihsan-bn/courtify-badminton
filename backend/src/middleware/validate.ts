@@ -21,9 +21,17 @@ export function validate(schemas: ValidationSchemas): RequestHandler {
         ) as Request["params"];
       }
       if (schemas.query) {
-        request.query = schemas.query.parse(
+        const parsedQuery = schemas.query.parse(
           request.query
         ) as Request["query"];
+
+        // Express 5 exposes query as a getter, so assignment throws at runtime.
+        Object.defineProperty(request, "query", {
+          value: parsedQuery,
+          writable: true,
+          configurable: true,
+          enumerable: true
+        });
       }
       next();
     } catch (error) {

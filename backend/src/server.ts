@@ -52,13 +52,22 @@ function getErrorDetails(error: unknown): ErrorDetails {
 
 async function startServer(): Promise<void> {
   // dotenv has completed before these modules validate or consume the config.
-  const [{ app }, databaseModule, { env }] = await Promise.all([
+  const [
+    { app },
+    databaseModule,
+    { env },
+    { startExpiredLockCleanupScheduler }
+  ] = await Promise.all([
     import("./app.js"),
     import("./config/database.js"),
-    import("./config/env.js")
+    import("./config/env.js"),
+    import("./modules/bookings/lockCleanup.service.js")
   ]);
   const closeActiveDatabase = databaseModule.closeDatabase;
   closeDatabase = closeActiveDatabase;
+  const stopExpiredLockCleanup = startExpiredLockCleanupScheduler(
+    env.lockCleanupIntervalMs
+  );
 
   const server = app.listen(env.port, () => {
     console.info(
@@ -78,6 +87,7 @@ async function startServer(): Promise<void> {
       return;
     }
     shuttingDown = true;
+    stopExpiredLockCleanup();
 
     console.info(
       JSON.stringify({

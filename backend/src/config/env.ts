@@ -11,7 +11,13 @@ const rawEnvSchema = z
     JWT_EXPIRES_IN: z.string().regex(durationPattern),
     CORS_ALLOWED_ORIGINS: z.string().min(1),
     OTP_PEPPER: z.string().min(32),
-    TRUST_PROXY: z.string().regex(/^(false|true|[1-9]\d*)$/)
+    TRUST_PROXY: z.string().regex(/^(false|true|[1-9]\d*)$/),
+    LOCK_CLEANUP_INTERVAL_MS: z
+      .string()
+      .regex(/^[1-9]\d*$/, "Must be a positive integer")
+      .transform(Number)
+      .pipe(z.number().int().min(1000).max(86_400_000))
+      .optional()
   });
 
 const parsed = rawEnvSchema.safeParse(process.env);
@@ -87,5 +93,6 @@ export const env = Object.freeze({
   corsAllowedOrigins,
   otpPepper: parsed.data.OTP_PEPPER,
   trustProxy,
+  lockCleanupIntervalMs: parsed.data.LOCK_CLEANUP_INTERVAL_MS ?? 60_000,
   isProduction: parsed.data.NODE_ENV === "production"
 });
