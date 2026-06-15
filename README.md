@@ -53,3 +53,9 @@ The strict `booking_slots(court_id, slot_date, start_hour)` unique constraint
 prevents double booking. A future cancellation or expired-lock transaction
 must delete the affected slot rows while preserving the parent booking as the
 audit record, which immediately makes those hours available again.
+
+## Backend
+
+The Phase 2 Express and TypeScript API is located in `backend/`. See
+`backend/README.md` for environment setup, commands, security requirements,
+and request examples.
