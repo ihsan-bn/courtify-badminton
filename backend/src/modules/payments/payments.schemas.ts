@@ -9,3 +9,9 @@ export const createCheckoutSessionSchema = z
 export type CreateCheckoutSessionInput = z.infer<
   typeof createCheckoutSessionSchema
 >;
+
+export const retryCheckoutSessionSchema = createCheckoutSessionSchema;
+
+export type RetryCheckoutSessionInput = z.infer<
+  typeof retryCheckoutSessionSchema
+>;

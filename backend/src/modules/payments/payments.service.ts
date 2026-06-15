@@ -1,4 +1,5 @@
 import type Stripe from "stripe";
+import { DatabaseError } from "pg";
 
 import { withTransaction } from "../../config/database.js";
 import { env } from "../../config/env.js";
@@ -9,8 +10,12 @@ import {
   ForbiddenError,
   NotFoundError
 } from "../../utils/errors.js";
+import { bookingsRepository } from "../bookings/bookings.repository.js";
 import { paymentsRepository } from "./payments.repository.js";
-import type { CreateCheckoutSessionInput } from "./payments.schemas.js";
+import type {
+  CreateCheckoutSessionInput,
+  RetryCheckoutSessionInput
+} from "./payments.schemas.js";
 
 interface CheckoutSessionResult {
   booking_id: string;
@@ -52,6 +57,80 @@ function createDescription(
   )} to ${bruneiDateTimeFormatter.format(reservationEndAt)}`;
 }
 
+async function createStripeCheckoutSession(
+  booking: {
+    id: string;
+    user_id: string;
+    court_name: string;
+    total_amount_bnd: string;
+    reservation_start_at: Date;
+    reservation_end_at: Date;
+  },
+  idempotencyKey: string
+): Promise<Stripe.Checkout.Session> {
+  try {
+    return await stripe.checkout.sessions.create(
+      {
+        mode: "payment",
+        success_url: env.stripeSuccessUrl,
+        cancel_url: env.stripeCancelUrl,
+        client_reference_id: booking.id,
+        metadata: {
+          booking_id: booking.id,
+          user_id: booking.user_id
+        },
+        payment_intent_data: {
+          metadata: {
+            booking_id: booking.id,
+            user_id: booking.user_id
+          }
+        },
+        line_items: [
+          {
+            quantity: 1,
+            price_data: {
+              currency: "bnd",
+              unit_amount: convertBndToCents(booking.total_amount_bnd),
+              product_data: {
+                name: "Courtify-Badminton Booking",
+                description: createDescription(
+                  booking.court_name,
+                  booking.reservation_start_at,
+                  booking.reservation_end_at
+                )
+              }
+            }
+          }
+        ]
+      },
+      { idempotencyKey }
+    );
+  } catch {
+    throw new AppError(
+      502,
+      "PAYMENT_PROVIDER_ERROR",
+      "Unable to create Stripe Checkout session"
+    );
+  }
+}
+
+function isSlotConflict(error: unknown): boolean {
+  return (
+    error instanceof DatabaseError &&
+    error.code === "23505" &&
+    error.constraint === "booking_slots_court_date_hour_key"
+  );
+}
+
+function getMetadataBookingId(paymentIntent: Stripe.PaymentIntent): string | null {
+  const bookingId = paymentIntent.metadata.booking_id;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    bookingId ?? ""
+  )
+    ? (bookingId ?? null)
+    : null;
+}
+
 export const paymentsService = {
   async createCheckoutSession(
     userId: string,
@@ -86,47 +165,10 @@ export const paymentsService = {
         );
       }
 
-      let checkoutSession: Stripe.Checkout.Session;
-      try {
-        checkoutSession = await stripe.checkout.sessions.create(
-          {
-            mode: "payment",
-            success_url: env.stripeSuccessUrl,
-            cancel_url: env.stripeCancelUrl,
-            client_reference_id: booking.id,
-            metadata: {
-              booking_id: booking.id,
-              user_id: booking.user_id
-            },
-            line_items: [
-              {
-                quantity: 1,
-                price_data: {
-                  currency: "bnd",
-                  unit_amount: convertBndToCents(booking.total_amount_bnd),
-                  product_data: {
-                    name: "Courtify-Badminton Booking",
-                    description: createDescription(
-                      booking.court_name,
-                      booking.reservation_start_at,
-                      booking.reservation_end_at
-                    )
-                  }
-                }
-              }
-            ]
-          },
-          {
-            idempotencyKey: `checkout-session:${booking.id}`
-          }
-        );
-      } catch {
-        throw new AppError(
-          502,
-          "PAYMENT_PROVIDER_ERROR",
-          "Unable to create Stripe Checkout session"
-        );
-      }
+      const checkoutSession = await createStripeCheckoutSession(
+        booking,
+        `checkout-session:${booking.id}`
+      );
 
       if (!checkoutSession.url) {
         throw new AppError(
@@ -165,6 +207,131 @@ export const paymentsService = {
     });
   },
 
+  async retryCheckoutSession(
+    userId: string,
+    input: RetryCheckoutSessionInput
+  ): Promise<CheckoutSessionResult> {
+    try {
+      return await withTransaction(async (client) => {
+        const booking = await paymentsRepository.findBookingForCheckout(
+          client,
+          input.booking_id
+        );
+
+        if (!booking) {
+          throw new NotFoundError("Booking not found");
+        }
+        if (booking.user_id !== userId) {
+          throw new ForbiddenError("Booking belongs to another customer");
+        }
+        if (booking.status !== "locked" && booking.status !== "expired") {
+          throw new ConflictError(
+            "This booking is not eligible for payment retry"
+          );
+        }
+
+        const previousCheckoutSessionId =
+          booking.stripe_checkout_session_id;
+        const lockHasExpired =
+          booking.status === "locked" &&
+          (!booking.lock_expires_at ||
+            booking.lock_expires_at.getTime() <= Date.now());
+
+        if (lockHasExpired) {
+          await paymentsRepository.deleteLockedBookingSlots(
+            client,
+            booking.id
+          );
+          await paymentsRepository.markLockedBookingExpired(
+            client,
+            booking.id
+          );
+        }
+
+        if (booking.status === "expired" || lockHasExpired) {
+          if (!booking.court_active) {
+            throw new ConflictError(
+              "The original court is no longer available"
+            );
+          }
+
+          await paymentsRepository.deleteLockedBookingSlots(
+            client,
+            booking.id
+          );
+          const relocked = await paymentsRepository.relockExpiredBooking(
+            client,
+            booking.id
+          );
+          if (!relocked) {
+            throw new ConflictError(
+              "The original booking time can no longer be retried"
+            );
+          }
+
+          const expiredOverlappingBookingIds =
+            await paymentsRepository.findExpiredOverlappingBookingIds(
+              client,
+              booking.id
+            );
+          await bookingsRepository.deleteSlotsForExpiredBookings(
+            client,
+            expiredOverlappingBookingIds
+          );
+          await bookingsRepository.markBookingsExpired(
+            client,
+            expiredOverlappingBookingIds
+          );
+
+          await paymentsRepository.recreateLockedBookingSlots(
+            client,
+            booking.id
+          );
+        }
+
+        const checkoutSession = await createStripeCheckoutSession(
+          booking,
+          `retry-checkout:${booking.id}:${
+            previousCheckoutSessionId ?? "none"
+          }`
+        );
+
+        if (!checkoutSession.url) {
+          throw new AppError(
+            502,
+            "PAYMENT_PROVIDER_ERROR",
+            "Stripe Checkout session did not provide a checkout URL"
+          );
+        }
+
+        const stored = await paymentsRepository.replaceCheckoutSession(
+          client,
+          booking.id,
+          userId,
+          checkoutSession.id
+        );
+        if (!stored) {
+          throw new ConflictError(
+            "Booking lock expired before checkout could be retried"
+          );
+        }
+
+        return {
+          booking_id: booking.id,
+          checkout_session_id: checkoutSession.id,
+          checkout_url: checkoutSession.url
+        };
+      });
+    } catch (error) {
+      if (isSlotConflict(error)) {
+        throw new ConflictError(
+          "The original court slots are no longer available"
+        );
+      }
+      throw error;
+    }
+  },
+
   verifyWebhookEvent(rawBody: Buffer, signature: string): Stripe.Event {
     try {
       return stripe.webhooks.constructEvent(
@@ -185,7 +352,9 @@ export const paymentsService = {
   async processWebhookEvent(event: Stripe.Event): Promise<void> {
     if (
       event.type !== "checkout.session.completed" &&
-      event.type !== "payment_intent.succeeded"
+      event.type !== "checkout.session.expired" &&
+      event.type !== "payment_intent.succeeded" &&
+      event.type !== "payment_intent.payment_failed"
     ) {
       return;
     }
@@ -198,6 +367,42 @@ export const paymentsService = {
         event
       );
       if (!claimed) {
+        return;
+      }
+
+      if (event.type === "payment_intent.payment_failed") {
+        const paymentIntent = event.data.object;
+        const booking =
+          await paymentsRepository.findBookingForPaymentFailure(
+            client,
+            paymentIntent.id,
+            getMetadataBookingId(paymentIntent)
+          );
+        if (booking) {
+          await paymentsRepository.attachPaymentEventToBooking(
+            client,
+            event.id,
+            booking.id
+          );
+        }
+
+        console.warn(
+          `Stripe payment failed for payment intent ${paymentIntent.id}`
+        );
+        if (
+          booking?.status === "locked" &&
+          booking.lock_expires_at &&
+          booking.lock_expires_at.getTime() <= Date.now()
+        ) {
+          await paymentsRepository.deleteLockedBookingSlots(
+            client,
+            booking.id
+          );
+          await paymentsRepository.markLockedBookingExpired(
+            client,
+            booking.id
+          );
+        }
         return;
       }
 
@@ -236,6 +441,20 @@ export const paymentsService = {
         event.id,
         booking.id
       );
+
+      if (event.type === "checkout.session.expired") {
+        if (booking.status === "locked") {
+          await paymentsRepository.deleteLockedBookingSlots(
+            client,
+            booking.id
+          );
+          await paymentsRepository.markLockedBookingExpired(
+            client,
+            booking.id
+          );
+        }
+        return;
+      }
 
       if (
         booking.status !== "locked" ||

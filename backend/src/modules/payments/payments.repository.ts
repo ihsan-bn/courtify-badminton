@@ -6,6 +6,7 @@ import type { BookingStatus } from "../bookings/bookings.repository.js";
 export interface CheckoutBookingRecord {
   id: string;
   user_id: string;
+  court_id: string;
   status: BookingStatus;
   total_amount_bnd: string;
   lock_expires_at: Date | null;
@@ -13,6 +14,7 @@ export interface CheckoutBookingRecord {
   reservation_end_at: Date;
   court_name: string;
   stripe_checkout_session_id: string | null;
+  court_active: boolean;
 }
 
 export interface WebhookBookingRecord {
@@ -32,13 +34,15 @@ export const paymentsRepository = {
         select
           booking.id,
           booking.user_id,
+          booking.court_id,
           booking.status,
           booking.total_amount_bnd,
           booking.lock_expires_at,
           booking.reservation_start_at,
           booking.reservation_end_at,
           court.name as court_name,
-          booking.stripe_checkout_session_id
+          booking.stripe_checkout_session_id,
+          court.active as court_active
         from public.bookings as booking
         inner join public.courts as court
           on court.id = booking.court_id
@@ -67,6 +71,29 @@ export const paymentsRepository = {
           and status = 'locked'
           and lock_expires_at > clock_timestamp()
           and stripe_checkout_session_id is null
+        returning id
+      `,
+      [bookingId, userId, checkoutSessionId]
+    );
+
+    return result.rowCount === 1;
+  },
+
+  async replaceCheckoutSession(
+    client: PoolClient,
+    bookingId: string,
+    userId: string,
+    checkoutSessionId: string
+  ): Promise<boolean> {
+    const result = await queryWithClient<{ id: string }>(
+      client,
+      `
+        update public.bookings
+        set stripe_checkout_session_id = $3
+        where id = $1
+          and user_id = $2
+          and status = 'locked'
+          and lock_expires_at > clock_timestamp()
         returning id
       `,
       [bookingId, userId, checkoutSessionId]
@@ -149,6 +176,163 @@ export const paymentsRepository = {
     );
 
     return result.rows[0] ?? null;
+  },
+
+  async findBookingForPaymentFailure(
+    client: PoolClient,
+    paymentIntentId: string,
+    metadataBookingId: string | null
+  ): Promise<WebhookBookingRecord | null> {
+    const result = await queryWithClient<WebhookBookingRecord>(
+      client,
+      `
+        select id, status, lock_expires_at
+        from public.bookings
+        where stripe_payment_intent_id = $1
+          or ($2::uuid is not null and id = $2)
+        order by (stripe_payment_intent_id = $1) desc
+        limit 1
+        for update
+      `,
+      [paymentIntentId, metadataBookingId]
+    );
+
+    return result.rows[0] ?? null;
+  },
+
+  async deleteLockedBookingSlots(
+    client: PoolClient,
+    bookingId: string
+  ): Promise<void> {
+    await queryWithClient(
+      client,
+      `
+        delete from public.booking_slots
+        where booking_id = $1
+          and status = 'locked'
+      `,
+      [bookingId]
+    );
+  },
+
+  async markLockedBookingExpired(
+    client: PoolClient,
+    bookingId: string
+  ): Promise<boolean> {
+    const result = await queryWithClient<{ id: string }>(
+      client,
+      `
+        update public.bookings
+        set status = 'expired',
+            lock_expires_at = null
+        where id = $1
+          and status = 'locked'
+        returning id
+      `,
+      [bookingId]
+    );
+
+    return result.rowCount === 1;
+  },
+
+  async relockExpiredBooking(
+    client: PoolClient,
+    bookingId: string
+  ): Promise<boolean> {
+    const result = await queryWithClient<{ id: string }>(
+      client,
+      `
+        update public.bookings
+        set status = 'locked',
+            lock_expires_at = now() + interval '10 minutes',
+            stripe_checkout_session_id = null,
+            stripe_payment_intent_id = null
+        where id = $1
+          and status = 'expired'
+          and reservation_start_at > clock_timestamp()
+        returning id
+      `,
+      [bookingId]
+    );
+
+    return result.rowCount === 1;
+  },
+
+  async findExpiredOverlappingBookingIds(
+    client: PoolClient,
+    bookingId: string
+  ): Promise<string[]> {
+    const result = await queryWithClient<{ id: string }>(
+      client,
+      `
+        select conflicting_booking.id
+        from public.bookings as conflicting_booking
+        where conflicting_booking.status = 'locked'
+          and conflicting_booking.lock_expires_at < now()
+          and conflicting_booking.id <> $1
+          and exists (
+            select 1
+            from public.bookings as target_booking
+            inner join public.booking_slots as conflicting_slot
+              on conflicting_slot.court_id = target_booking.court_id
+             and conflicting_slot.slot_date = (
+               target_booking.reservation_start_at
+                 at time zone 'Asia/Brunei'
+             )::date
+             and conflicting_slot.start_hour >= extract(
+               hour from target_booking.reservation_start_at
+                 at time zone 'Asia/Brunei'
+             )::integer
+             and conflicting_slot.start_hour < extract(
+               hour from target_booking.reservation_end_at
+                 at time zone 'Asia/Brunei'
+             )::integer
+             and conflicting_slot.booking_id = conflicting_booking.id
+             and conflicting_slot.status = 'locked'
+            where target_booking.id = $1
+          )
+        for update
+      `,
+      [bookingId]
+    );
+
+    return result.rows.map((booking) => booking.id);
+  },
+
+  async recreateLockedBookingSlots(
+    client: PoolClient,
+    bookingId: string
+  ): Promise<void> {
+    await queryWithClient(
+      client,
+      `
+        insert into public.booking_slots (
+          booking_id,
+          court_id,
+          slot_date,
+          start_hour,
+          status
+        )
+        select
+          booking.id,
+          booking.court_id,
+          (booking.reservation_start_at at time zone 'Asia/Brunei')::date,
+          requested_hour,
+          'locked'
+        from public.bookings as booking
+        cross join lateral generate_series(
+          extract(
+            hour from booking.reservation_start_at at time zone 'Asia/Brunei'
+          )::integer,
+          extract(
+            hour from booking.reservation_end_at at time zone 'Asia/Brunei'
+          )::integer - 1
+        ) as requested_hour
+        where booking.id = $1
+          and booking.status = 'locked'
+      `,
+      [bookingId]
+    );
   },
 
   async confirmBooking(

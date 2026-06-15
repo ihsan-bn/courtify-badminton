@@ -135,7 +135,7 @@ forward supported events to the API:
 
 ```bash
 stripe listen \
-  --events checkout.session.completed,payment_intent.succeeded \
+  --events checkout.session.completed,checkout.session.expired,payment_intent.succeeded,payment_intent.payment_failed \
   --forward-to localhost:3001/api/payments/webhook
 ```
 
@@ -143,6 +143,13 @@ Trigger a test Checkout completion:
 
 ```bash
 stripe trigger checkout.session.completed
+```
+
+Trigger the recovery events:
+
+```bash
+stripe trigger checkout.session.expired
+stripe trigger payment_intent.payment_failed
 ```
 
 The generated event validates forwarding, signature verification, and event
@@ -155,6 +162,20 @@ event IDs return HTTP `200` without reprocessing. A valid completed Checkout
 confirms only a still-locked booking, stores the payment intent ID, changes its
 hourly slots to `confirmed`, and records the verified event in
 `payment_events`.
+
+Retry Checkout for an owned `locked` or `expired` booking:
+
+```bash
+curl -X POST http://localhost:3001/api/payments/retry-checkout-session \
+  -H "Authorization: Bearer ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"booking_id":"BOOKING_ID"}'
+```
+
+An unexpired lock receives a fresh Checkout Session. An expired booking is
+re-locked for ten minutes only when all original consecutive court slots are
+still available; otherwise the API returns HTTP `409`. Apply the
+`202606150001_allow_booking_relock.sql` migration before using this endpoint.
 
 List the authenticated customer's booking history:
 
