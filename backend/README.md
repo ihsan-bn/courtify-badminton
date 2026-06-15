@@ -115,6 +115,20 @@ The server calculates the BND total and atomically creates one locked booking
 plus one locked row for each consecutive hourly slot. A conflicting active
 lock or confirmed slot returns HTTP `409`.
 
+Create a Stripe Checkout Session for an active booking lock:
+
+```bash
+curl -X POST http://localhost:3001/api/payments/checkout-session \
+  -H "Authorization: Bearer ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"booking_id":"BOOKING_ID"}'
+```
+
+The server reads the authoritative BND amount from the locked booking, creates
+one Stripe Checkout line item, and stores the Checkout Session ID. This phase
+does not confirm the booking or update its hourly slots; payment confirmation
+will be handled by the Stripe webhook phase.
+
 List the authenticated customer's booking history:
 
 ```bash

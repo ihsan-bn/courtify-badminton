@@ -21,6 +21,7 @@
     "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.2",
     "pg": "^8.16.0",
+    "stripe": "^18.5.0",
     "zod": "^3.25.0"
   },
   "devDependencies": {

@@ -21,6 +21,7 @@ import {
   publicCourtsRouter
 } from "./modules/courts/courts.routes.js";
 import { healthRouter } from "./modules/health/health.routes.js";
+import { paymentsRouter } from "./modules/payments/payments.routes.js";
 import { usersRouter } from "./modules/users/users.routes.js";
 import { ForbiddenError } from "./utils/errors.js";
 
@@ -56,6 +57,7 @@ app.use("/api/me", usersRouter);
 app.use("/api/courts", publicCourtsRouter);
 app.use("/api/availability", availabilityRouter);
 app.use("/api/bookings", bookingsRouter);
+app.use("/api/payments", paymentsRouter);
 app.use("/api/admin/courts", adminCourtsRouter);
 app.use("/api/admin/bookings", adminBookingsRouter);
 app.use(

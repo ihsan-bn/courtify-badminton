@@ -1,0 +1,71 @@
+import type { PoolClient } from "pg";
+
+import { queryWithClient } from "../../config/database.js";
+import type { BookingStatus } from "../bookings/bookings.repository.js";
+
+export interface CheckoutBookingRecord {
+  id: string;
+  user_id: string;
+  status: BookingStatus;
+  total_amount_bnd: string;
+  lock_expires_at: Date | null;
+  reservation_start_at: Date;
+  reservation_end_at: Date;
+  court_name: string;
+  stripe_checkout_session_id: string | null;
+}
+
+export const paymentsRepository = {
+  async findBookingForCheckout(
+    client: PoolClient,
+    bookingId: string
+  ): Promise<CheckoutBookingRecord | null> {
+    const result = await queryWithClient<CheckoutBookingRecord>(
+      client,
+      `
+        select
+          booking.id,
+          booking.user_id,
+          booking.status,
+          booking.total_amount_bnd,
+          booking.lock_expires_at,
+          booking.reservation_start_at,
+          booking.reservation_end_at,
+          court.name as court_name,
+          booking.stripe_checkout_session_id
+        from public.bookings as booking
+        inner join public.courts as court
+          on court.id = booking.court_id
+        where booking.id = $1
+        for update
+      `,
+      [bookingId]
+    );
+
+    return result.rows[0] ?? null;
+  },
+
+  async storeCheckoutSession(
+    client: PoolClient,
+    bookingId: string,
+    userId: string,
+    checkoutSessionId: string
+  ): Promise<boolean> {
+    const result = await queryWithClient<{ id: string }>(
+      client,
+      `
+        update public.bookings
+        set stripe_checkout_session_id = $3
+        where id = $1
+          and user_id = $2
+          and status = 'locked'
+          and lock_expires_at > clock_timestamp()
+          and stripe_checkout_session_id is null
+        returning id
+      `,
+      [bookingId, userId, checkoutSessionId]
+    );
+
+    return result.rowCount === 1;
+  }
+};

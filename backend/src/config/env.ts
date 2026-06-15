@@ -17,7 +17,15 @@ const rawEnvSchema = z
       .regex(/^[1-9]\d*$/, "Must be a positive integer")
       .transform(Number)
       .pipe(z.number().int().min(1000).max(86_400_000))
-      .optional()
+      .optional(),
+    STRIPE_SECRET_KEY: z
+      .string()
+      .regex(
+        /^sk_(test|live)_[A-Za-z0-9]+$/,
+        "Must be a valid Stripe secret key"
+      ),
+    STRIPE_SUCCESS_URL: z.string().url(),
+    STRIPE_CANCEL_URL: z.string().url()
   });
 
 const parsed = rawEnvSchema.safeParse(process.env);
@@ -77,6 +85,31 @@ if (parsed.data.NODE_ENV === "production" && parsed.data.TRUST_PROXY === "true")
   );
 }
 
+const stripeSuccessUrl = new URL(parsed.data.STRIPE_SUCCESS_URL);
+const stripeCancelUrl = new URL(parsed.data.STRIPE_CANCEL_URL);
+
+if (
+  !["http:", "https:"].includes(stripeSuccessUrl.protocol) ||
+  !["http:", "https:"].includes(stripeCancelUrl.protocol)
+) {
+  throw new Error("Stripe success and cancel URLs must use HTTP or HTTPS");
+}
+
+if (
+  parsed.data.NODE_ENV === "production" &&
+  (stripeSuccessUrl.protocol !== "https:" ||
+    stripeCancelUrl.protocol !== "https:")
+) {
+  throw new Error("Production Stripe redirect URLs must use HTTPS");
+}
+
+if (
+  parsed.data.NODE_ENV === "production" &&
+  !parsed.data.STRIPE_SECRET_KEY.startsWith("sk_live_")
+) {
+  throw new Error("Production must use a live Stripe secret key");
+}
+
 const trustProxy =
   parsed.data.TRUST_PROXY === "false"
     ? false
@@ -94,5 +127,8 @@ export const env = Object.freeze({
   otpPepper: parsed.data.OTP_PEPPER,
   trustProxy,
   lockCleanupIntervalMs: parsed.data.LOCK_CLEANUP_INTERVAL_MS ?? 60_000,
+  stripeSecretKey: parsed.data.STRIPE_SECRET_KEY,
+  stripeSuccessUrl: parsed.data.STRIPE_SUCCESS_URL,
+  stripeCancelUrl: parsed.data.STRIPE_CANCEL_URL,
   isProduction: parsed.data.NODE_ENV === "production"
 });
