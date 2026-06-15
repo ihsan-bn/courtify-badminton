@@ -21,7 +21,10 @@ import {
   publicCourtsRouter
 } from "./modules/courts/courts.routes.js";
 import { healthRouter } from "./modules/health/health.routes.js";
-import { paymentsRouter } from "./modules/payments/payments.routes.js";
+import {
+  paymentsRouter,
+  paymentsWebhookRouter
+} from "./modules/payments/payments.routes.js";
 import { usersRouter } from "./modules/users/users.routes.js";
 import { ForbiddenError } from "./utils/errors.js";
 
@@ -48,8 +51,11 @@ app.use(
     maxAge: 600
   })
 );
-app.use(express.json({ limit: "32kb", strict: true }));
 app.use(globalRateLimiter);
+
+// Stripe signature verification requires the untouched request bytes.
+app.use("/api/payments", paymentsWebhookRouter);
+app.use(express.json({ limit: "32kb", strict: true }));
 
 app.use("/health", healthRouter);
 app.use("/api/auth", authRouter);

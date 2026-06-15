@@ -24,6 +24,12 @@ const rawEnvSchema = z
         /^sk_(test|live)_[A-Za-z0-9]+$/,
         "Must be a valid Stripe secret key"
       ),
+    STRIPE_WEBHOOK_SECRET: z
+      .string()
+      .regex(
+        /^whsec_[A-Za-z0-9]+$/,
+        "Must be a valid Stripe webhook signing secret"
+      ),
     STRIPE_SUCCESS_URL: z.string().url(),
     STRIPE_CANCEL_URL: z.string().url()
   });
@@ -128,6 +134,7 @@ export const env = Object.freeze({
   trustProxy,
   lockCleanupIntervalMs: parsed.data.LOCK_CLEANUP_INTERVAL_MS ?? 60_000,
   stripeSecretKey: parsed.data.STRIPE_SECRET_KEY,
+  stripeWebhookSecret: parsed.data.STRIPE_WEBHOOK_SECRET,
   stripeSuccessUrl: parsed.data.STRIPE_SUCCESS_URL,
   stripeCancelUrl: parsed.data.STRIPE_CANCEL_URL,
   isProduction: parsed.data.NODE_ENV === "production"

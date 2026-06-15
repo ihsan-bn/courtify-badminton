@@ -25,3 +25,35 @@ export const createCheckoutSession: RequestHandler = async (
   );
   response.status(201).json(result);
 };
+
+export const handleStripeWebhook: RequestHandler = async (
+  request,
+  response
+) => {
+  const signature = request.header("stripe-signature");
+  if (!signature) {
+    console.warn("Stripe webhook rejected because the signature is missing");
+    response.status(400).json({
+      error: {
+        code: "INVALID_WEBHOOK_SIGNATURE",
+        message: "Invalid Stripe webhook signature"
+      }
+    });
+    return;
+  }
+
+  if (!Buffer.isBuffer(request.body)) {
+    console.warn("Stripe webhook rejected because the raw body is unavailable");
+    response.status(400).json({
+      error: {
+        code: "INVALID_WEBHOOK_BODY",
+        message: "Invalid Stripe webhook body"
+      }
+    });
+    return;
+  }
+
+  const event = paymentsService.verifyWebhookEvent(request.body, signature);
+  await paymentsService.processWebhookEvent(event);
+  response.status(200).json({ received: true });
+};

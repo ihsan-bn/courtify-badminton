@@ -1,7 +1,8 @@
-import { createRequire } from "node:module";
+import type Stripe from "stripe";
 
 import { withTransaction } from "../../config/database.js";
 import { env } from "../../config/env.js";
+import { stripe } from "../../config/stripe.js";
 import {
   AppError,
   ConflictError,
@@ -11,100 +12,10 @@ import {
 import { paymentsRepository } from "./payments.repository.js";
 import type { CreateCheckoutSessionInput } from "./payments.schemas.js";
 
-interface StripeCheckoutSession {
-  id: string;
-  url: string | null;
-}
-
-interface StripeCheckoutSessions {
-  create(
-    parameters: {
-      mode: "payment";
-      success_url: string;
-      cancel_url: string;
-      client_reference_id: string;
-      metadata: Record<string, string>;
-      line_items: {
-        quantity: number;
-        price_data: {
-          currency: "bnd";
-          unit_amount: number;
-          product_data: {
-            name: string;
-            description: string;
-          };
-        };
-      }[];
-    },
-    options: { idempotencyKey: string }
-  ): Promise<StripeCheckoutSession>;
-  expire(sessionId: string): Promise<unknown>;
-}
-
-interface StripeClient {
-  checkout: {
-    sessions: StripeCheckoutSessions;
-  };
-}
-
-type StripeConstructor = new (
-  secretKey: string,
-  options: { appInfo: { name: string; version: string } }
-) => StripeClient;
-
 interface CheckoutSessionResult {
   booking_id: string;
   checkout_session_id: string;
   checkout_url: string;
-}
-
-const requireFromCurrentModule = createRequire(__filename);
-let stripeClient: StripeClient | undefined;
-
-function getStripeConstructor(moduleValue: unknown): StripeConstructor {
-  if (typeof moduleValue === "function") {
-    return moduleValue as StripeConstructor;
-  }
-
-  if (typeof moduleValue === "object" && moduleValue !== null) {
-    const moduleRecord = moduleValue as {
-      default?: unknown;
-      Stripe?: unknown;
-    };
-    if (typeof moduleRecord.default === "function") {
-      return moduleRecord.default as StripeConstructor;
-    }
-    if (typeof moduleRecord.Stripe === "function") {
-      return moduleRecord.Stripe as StripeConstructor;
-    }
-  }
-
-  throw new Error("Official Stripe SDK did not provide a constructor");
-}
-
-function getStripeClient(): StripeClient {
-  if (stripeClient) {
-    return stripeClient;
-  }
-
-  try {
-    const loadedStripeModule = requireFromCurrentModule("stripe") as unknown;
-    const Stripe = getStripeConstructor(loadedStripeModule);
-    stripeClient = new Stripe(env.stripeSecretKey, {
-      appInfo: {
-        name: "Courtify-Badminton",
-        version: "1.0.0"
-      }
-    });
-    return stripeClient;
-  } catch (error) {
-    console.error("Failed to initialize official Stripe SDK", error);
-    throw new AppError(
-      503,
-      "PAYMENT_SERVICE_UNAVAILABLE",
-      "Payment service is temporarily unavailable"
-    );
-  }
 }
 
 const bruneiDateTimeFormatter = new Intl.DateTimeFormat("en-BN", {
@@ -147,7 +58,6 @@ export const paymentsService = {
     input: CreateCheckoutSessionInput
   ): Promise<CheckoutSessionResult> {
     return withTransaction(async (client) => {
-      const stripe = getStripeClient();
       const booking = await paymentsRepository.findBookingForCheckout(
         client,
         input.booking_id
@@ -176,7 +86,7 @@ export const paymentsService = {
         );
       }
 
-      let checkoutSession: StripeCheckoutSession;
+      let checkoutSession: Stripe.Checkout.Session;
       try {
         checkoutSession = await stripe.checkout.sessions.create(
           {
@@ -252,6 +162,117 @@ export const paymentsService = {
         checkout_session_id: checkoutSession.id,
         checkout_url: checkoutSession.url
       };
+    });
+  },
+
+  verifyWebhookEvent(rawBody: Buffer, signature: string): Stripe.Event {
+    try {
+      return stripe.webhooks.constructEvent(
+        rawBody,
+        signature,
+        env.stripeWebhookSecret
+      );
+    } catch (error) {
+      console.warn("Stripe webhook signature verification failed", error);
+      throw new AppError(
+        400,
+        "INVALID_WEBHOOK_SIGNATURE",
+        "Invalid Stripe webhook signature"
+      );
+    }
+  },
+
+  async processWebhookEvent(event: Stripe.Event): Promise<void> {
+    if (
+      event.type !== "checkout.session.completed" &&
+      event.type !== "payment_intent.succeeded"
+    ) {
+      return;
+    }
+
+    await withTransaction(async (client) => {
+      const claimed = await paymentsRepository.claimPaymentEvent(
+        client,
+        event.id,
+        event.type,
+        event
+      );
+      if (!claimed) {
+        return;
+      }
+
+      if (event.type === "payment_intent.succeeded") {
+        const paymentIntent = event.data.object;
+        const booking = await paymentsRepository.findBookingByPaymentIntent(
+          client,
+          paymentIntent.id
+        );
+        if (booking) {
+          await paymentsRepository.attachPaymentEventToBooking(
+            client,
+            event.id,
+            booking.id
+          );
+        }
+        return;
+      }
+
+      const checkoutSession = event.data.object;
+      const booking =
+        await paymentsRepository.findBookingByCheckoutSessionForUpdate(
+          client,
+          checkoutSession.id
+        );
+
+      if (!booking) {
+        console.warn(
+          `Stripe checkout session ${checkoutSession.id} has no booking`
+        );
+        return;
+      }
+
+      await paymentsRepository.attachPaymentEventToBooking(
+        client,
+        event.id,
+        booking.id
+      );
+
+      if (
+        booking.status !== "locked" ||
+        !booking.lock_expires_at ||
+        booking.lock_expires_at.getTime() <= Date.now()
+      ) {
+        console.warn(
+          `Booking ${booking.id} is not eligible for Stripe confirmation`
+        );
+        return;
+      }
+
+      const paymentIntentId =
+        typeof checkoutSession.payment_intent === "string"
+          ? checkoutSession.payment_intent
+          : checkoutSession.payment_intent?.id;
+
+      if (!paymentIntentId) {
+        console.warn(
+          `Stripe checkout session ${checkoutSession.id} has no payment intent`
+        );
+        return;
+      }
+
+      const confirmed = await paymentsRepository.confirmBooking(
+        client,
+        booking.id,
+        paymentIntentId
+      );
+      if (!confirmed) {
+        console.warn(
+          `Booking ${booking.id} expired before Stripe confirmation`
+        );
+        return;
+      }
+
+      await paymentsRepository.confirmBookingSlots(client, booking.id);
     });
   }
 };

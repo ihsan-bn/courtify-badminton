@@ -125,9 +125,36 @@ curl -X POST http://localhost:3001/api/payments/checkout-session \
 ```
 
 The server reads the authoritative BND amount from the locked booking, creates
-one Stripe Checkout line item, and stores the Checkout Session ID. This phase
-does not confirm the booking or update its hourly slots; payment confirmation
-will be handled by the Stripe webhook phase.
+one Stripe Checkout line item, and stores the Checkout Session ID. Booking
+confirmation is performed only by the verified Stripe webhook below.
+
+### Stripe webhook
+
+Set `STRIPE_WEBHOOK_SECRET` to the signing secret printed by Stripe CLI, then
+forward supported events to the API:
+
+```bash
+stripe listen \
+  --events checkout.session.completed,payment_intent.succeeded \
+  --forward-to localhost:3001/api/payments/webhook
+```
+
+Trigger a test Checkout completion:
+
+```bash
+stripe trigger checkout.session.completed
+```
+
+The generated event validates forwarding, signature verification, and event
+storage. To test booking confirmation end to end, create a real booking lock
+and Checkout Session through the API, then complete that Checkout Session with
+a Stripe test payment while `stripe listen` is running.
+
+The webhook requires Stripe's raw request body and valid signature. Duplicate
+event IDs return HTTP `200` without reprocessing. A valid completed Checkout
+confirms only a still-locked booking, stores the payment intent ID, changes its
+hourly slots to `confirmed`, and records the verified event in
+`payment_events`.
 
 List the authenticated customer's booking history:
 
