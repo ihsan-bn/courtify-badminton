@@ -271,6 +271,15 @@ export default function BookingsPage() {
                             </ul>
                           )}
                         </section>
+
+                        <div className="actions">
+                          <Link
+                            className="button-secondary"
+                            href={`/bookings/${booking.booking_id}`}
+                          >
+                            View details
+                          </Link>
+                        </div>
                       </article>
                     ))}
                   </div>

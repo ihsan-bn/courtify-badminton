@@ -415,6 +415,11 @@ a:focus-visible {
   text-align: right;
 }
 
+.reference-value {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 .empty-state {
   border: 1px dashed var(--border);
   border-radius: 1rem;

@@ -32,6 +32,7 @@ STRIPE_CANCEL_URL=http://localhost:3000/bookings/cancelled
 - `/dashboard` authenticated customer profile and placeholder action cards
 - `/book` authenticated court availability and temporary booking lock flow
 - `/bookings` authenticated customer booking history
+- `/bookings/[bookingId]` authenticated customer booking detail view
 - `/bookings/success` Stripe payment success landing page
 - `/bookings/cancelled` Stripe payment cancellation landing page
 
@@ -50,7 +51,10 @@ first unavailable slot after the selected start hour.
 
 The `/bookings` page calls `GET /api/bookings/me` and groups customer bookings
 by status: confirmed, locked, expired, cancellation requested, and cancelled.
-It is read-only in v0.6A; cancellation actions are intentionally not included.
+Each card links to `/bookings/[bookingId]`, which loads the same customer-only
+booking history response and displays the matching booking details without
+calling admin endpoints. These pages are read-only in v0.6B; cancellation
+actions are intentionally not included.
 
 ## Stripe Checkout Flow
 

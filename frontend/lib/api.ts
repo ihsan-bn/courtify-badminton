@@ -107,6 +107,7 @@ export interface CustomerBooking {
   reservation_start_at: string;
   reservation_end_at: string;
   lock_expires_at: string | null;
+  stripe_checkout_session_id?: string | null;
   created_at: string;
   slots: BookingHistorySlot[];
 }
