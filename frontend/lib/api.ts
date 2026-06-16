@@ -75,6 +75,13 @@ export interface BookingLockResponse {
   lock_expires_at: string;
 }
 
+export interface CheckoutSessionResponse {
+  booking_id?: string;
+  checkout_session_id?: string;
+  checkout_url?: string;
+  url?: string;
+}
+
 export class ApiError extends Error {
   public constructor(
     message: string,

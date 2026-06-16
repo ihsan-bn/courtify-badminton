@@ -9,6 +9,7 @@ import {
   type AvailabilityResponse,
   type AvailabilitySlot,
   type BookingLockResponse,
+  type CheckoutSessionResponse,
   type Court
 } from "@/lib/api";
 
@@ -67,6 +68,7 @@ export default function BookPage() {
   const [loadingCourts, setLoadingCourts] = useState(true);
   const [loadingAvailability, setLoadingAvailability] = useState(false);
   const [locking, setLocking] = useState(false);
+  const [creatingCheckout, setCreatingCheckout] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -235,6 +237,40 @@ export default function BookPage() {
       );
     } finally {
       setLocking(false);
+    }
+  }
+
+  async function continueToPayment() {
+    if (!lock || creatingCheckout) {
+      return;
+    }
+
+    setCreatingCheckout(true);
+    setError(null);
+
+    try {
+      const result = await apiFetch<CheckoutSessionResponse>(
+        "/api/payments/checkout-session",
+        {
+          method: "POST",
+          auth: true,
+          body: {
+            booking_id: lock.booking_id
+          }
+        }
+      );
+      const checkoutUrl = result.checkout_url ?? result.url;
+      if (!checkoutUrl) {
+        throw new ApiError("Checkout session did not include a payment URL.");
+      }
+      window.location.assign(checkoutUrl);
+    } catch (caught) {
+      setError(
+        caught instanceof ApiError
+          ? caught.message
+          : "Unable to start payment. Please try again."
+      );
+      setCreatingCheckout(false);
     }
   }
 
@@ -426,12 +462,17 @@ export default function BookPage() {
                 <button
                   className="button-secondary"
                   type="button"
-                  disabled
+                  disabled={creatingCheckout}
                   style={{ marginTop: "0.75rem" }}
+                  onClick={continueToPayment}
                 >
-                  Continue to Payment
+                  {creatingCheckout
+                    ? "Opening Stripe Checkout..."
+                    : "Continue to Payment"}
                 </button>
-                <p className="hint">Payment screen will be available in Phase 5C.</p>
+                <p className="hint">
+                  You will be redirected to Stripe Checkout to complete payment.
+                </p>
               </section>
             ) : null}
           </aside>
