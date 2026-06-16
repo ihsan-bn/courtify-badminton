@@ -14,8 +14,8 @@ export default function BookingSuccessPage() {
           <Link className="button" href="/dashboard">
             Go to Dashboard
           </Link>
-          <Link className="button-secondary" href="/dashboard">
-            My Bookings placeholder
+          <Link className="button-secondary" href="/bookings">
+            My Bookings
           </Link>
         </div>
       </div>

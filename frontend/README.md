@@ -31,6 +31,7 @@ STRIPE_CANCEL_URL=http://localhost:3000/bookings/cancelled
 - `/onboarding` first-time customer name and email setup
 - `/dashboard` authenticated customer profile and placeholder action cards
 - `/book` authenticated court availability and temporary booking lock flow
+- `/bookings` authenticated customer booking history
 - `/bookings/success` Stripe payment success landing page
 - `/bookings/cancelled` Stripe payment cancellation landing page
 
@@ -42,7 +43,8 @@ available slots on the client, and creates a ten-minute lock with
 `POST /api/bookings/lock`.
 
 The server remains the source of truth for availability, pricing, and conflict
-prevention.
+prevention. Duration options are capped by the court closing time and by the
+first unavailable slot after the selected start hour.
 
 ## Stripe Checkout Flow
 
@@ -51,7 +53,8 @@ After a temporary booking lock is created, `/book` calls
 does not calculate payment amounts and does not handle Stripe secrets. It uses
 the Checkout URL returned by the backend and redirects the browser to Stripe.
 
-Successful payments return to `/bookings/success`. Cancelled payments return to
+Successful payments return to `/bookings/success`, where customers are told the
+payment webhook is finalizing confirmation. Cancelled payments return to
 `/bookings/cancelled`, where customers are reminded that temporary locks can
 expire after 10 minutes.
 
@@ -62,5 +65,5 @@ npm run build
 npm run lint
 ```
 
-This frontend intentionally does not include admin pages, booking history,
-cancellation UI, notifications, or calendar invites yet.
+This frontend intentionally does not include admin pages, cancellation UI,
+notifications, or calendar invites yet.

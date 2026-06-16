@@ -162,6 +162,60 @@ export default function BookPage() {
     );
   }, [availability, durationHours, startHour]);
 
+  const consecutiveAvailableSlots = useMemo(() => {
+    if (!availability || startHour === null) {
+      return [];
+    }
+
+    const slots: AvailabilitySlot[] = [];
+    for (let hour = startHour; hour < CLOSING_HOUR; hour += 1) {
+      const slot = availability.slots.find(
+        (candidate) => candidate.start_hour === hour
+      );
+      if (!slot?.available) {
+        break;
+      }
+      slots.push(slot);
+    }
+    return slots;
+  }, [availability, startHour]);
+
+  const validDurationCount = consecutiveAvailableSlots.length;
+  const durationOptions = Array.from(
+    { length: validDurationCount },
+    (_, index) => index + 1
+  );
+
+  useEffect(() => {
+    if (startHour !== null && validDurationCount > 0) {
+      setDurationHours((currentDuration) =>
+        Math.min(currentDuration, validDurationCount)
+      );
+    }
+  }, [startHour, validDurationCount]);
+
+  const blockedDurationMessage = useMemo(() => {
+    if (!availability || startHour === null || validDurationCount === 0) {
+      return null;
+    }
+
+    const blockingHour = startHour + validDurationCount;
+    if (blockingHour >= CLOSING_HOUR) {
+      return null;
+    }
+
+    const blockingSlot = availability.slots.find(
+      (slot) => slot.start_hour === blockingHour
+    );
+    if (!blockingSlot || blockingSlot.available) {
+      return null;
+    }
+
+    return `Longer duration is blocked because ${formatHour(
+      blockingSlot.start_hour
+    )}-${formatHour(blockingSlot.end_hour)} is unavailable.`;
+  }, [availability, startHour, validDurationCount]);
+
   const selectionError = useMemo(() => {
     if (!selectedCourtId) {
       return "Select one court to continue.";
@@ -181,6 +235,9 @@ export default function BookPage() {
     if (startHour + durationHours > CLOSING_HOUR) {
       return "Booking must end no later than 22:00.";
     }
+    if (durationHours > validDurationCount) {
+      return "Selected duration is longer than the consecutive available slots.";
+    }
     if (selectedSlots.length !== durationHours) {
       return "Selected duration must use consecutive hourly slots.";
     }
@@ -193,11 +250,13 @@ export default function BookPage() {
     selectedCourtId,
     selectedDate,
     selectedSlots,
-    startHour
+    startHour,
+    validDurationCount
   ]);
 
-  const maxDuration = startHour === null ? 1 : CLOSING_HOUR - startHour;
   const selectedTotal = calculateTotal(selectedSlots);
+  const selectedEndHour =
+    startHour === null ? null : startHour + durationHours;
 
   function chooseStartHour(hour: number) {
     setStartHour(hour);
@@ -394,6 +453,14 @@ export default function BookPage() {
                 </strong>
               </div>
               <div className="summary-row">
+                <span>End</span>
+                <strong>
+                  {selectedEndHour === null
+                    ? "Not selected"
+                    : formatHour(selectedEndHour)}
+                </strong>
+              </div>
+              <div className="summary-row">
                 <span>Duration</span>
                 <strong>{durationHours} hour(s)</strong>
               </div>
@@ -404,22 +471,23 @@ export default function BookPage() {
               <select
                 id="duration"
                 value={durationHours}
-                disabled={startHour === null}
+                disabled={startHour === null || durationOptions.length === 0}
                 onChange={(event) =>
                   setDurationHours(Number(event.target.value))
                 }
               >
-                {Array.from({ length: maxDuration }, (_, index) => index + 1).map(
-                  (duration) => (
-                    <option key={duration} value={duration}>
-                      {duration} hour{duration === 1 ? "" : "s"}
-                    </option>
-                  )
-                )}
+                {durationOptions.map((duration) => (
+                  <option key={duration} value={duration}>
+                    {duration} hour{duration === 1 ? "" : "s"}
+                  </option>
+                ))}
               </select>
               <span className="hint">
                 Multiple hours must be consecutive on the same court.
               </span>
+              {blockedDurationMessage ? (
+                <span className="hint">{blockedDurationMessage}</span>
+              ) : null}
             </div>
 
             <div className="summary-list">
@@ -457,6 +525,7 @@ export default function BookPage() {
                   Time: {formatDateTime(lock.reservation_start_at)} to{" "}
                   {formatDateTime(lock.reservation_end_at)}
                 </p>
+                <p>Duration: {lock.duration_hours} hour(s)</p>
                 <p>Total: {formatBnd(lock.total_amount_bnd)}</p>
                 <p>Lock expires: {formatDateTime(lock.lock_expires_at)}</p>
                 <button

@@ -110,7 +110,12 @@ export default function DashboardPage() {
           </article>
           <article className="card">
             <h3>My Bookings</h3>
-            <p>Placeholder for upcoming and past customer bookings.</p>
+            <p>View your locked, confirmed, cancelled, and expired bookings.</p>
+            <div className="actions">
+              <Link className="button-secondary" href="/bookings">
+                View bookings
+              </Link>
+            </div>
           </article>
           <article className="card">
             <h3>Cancel Booking</h3>

@@ -82,6 +82,35 @@ export interface CheckoutSessionResponse {
   url?: string;
 }
 
+export type BookingStatus =
+  | "locked"
+  | "confirmed"
+  | "cancellation_requested"
+  | "cancelled"
+  | "expired";
+
+export interface BookingHistorySlot {
+  slot_date: string;
+  start_hour: number;
+  end_hour: number;
+  status: "locked" | "confirmed" | "cancellation_requested" | "cancelled";
+  price_bnd: string;
+}
+
+export interface CustomerBooking {
+  booking_id: string;
+  status: BookingStatus;
+  court_id: string;
+  court_name: string;
+  court_location: string;
+  total_amount_bnd: string;
+  reservation_start_at: string;
+  reservation_end_at: string;
+  lock_expires_at: string | null;
+  created_at: string;
+  slots: BookingHistorySlot[];
+}
+
 export class ApiError extends Error {
   public constructor(
     message: string,
