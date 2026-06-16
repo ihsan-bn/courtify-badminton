@@ -8,6 +8,38 @@ import { AuthGuard } from "@/components/AuthGuard";
 import { apiFetch, ApiError, type CustomerBooking } from "@/lib/api";
 import { clearAccessToken } from "@/lib/auth";
 
+const STATUS_GROUPS: {
+  status: CustomerBooking["status"];
+  title: string;
+  description: string;
+}[] = [
+  {
+    status: "confirmed",
+    title: "Confirmed",
+    description: "Paid bookings ready for play."
+  },
+  {
+    status: "locked",
+    title: "Locked",
+    description: "Temporary reservations awaiting payment."
+  },
+  {
+    status: "expired",
+    title: "Expired",
+    description: "Locks that expired before payment was completed."
+  },
+  {
+    status: "cancellation_requested",
+    title: "Cancellation Requested",
+    description: "Bookings waiting for cancellation review or refund handling."
+  },
+  {
+    status: "cancelled",
+    title: "Cancelled",
+    description: "Bookings that have been cancelled and released."
+  }
+];
+
 function formatDateTime(value: string): string {
   return new Intl.DateTimeFormat("en-BN", {
     timeZone: "Asia/Brunei",
@@ -81,6 +113,11 @@ export default function BookingsPage() {
     };
   }, [router]);
 
+  const groupedBookings = STATUS_GROUPS.map((group) => ({
+    ...group,
+    bookings: bookings.filter((booking) => booking.status === group.status)
+  }));
+
   return (
     <AuthGuard>
       <section className="page">
@@ -119,85 +156,129 @@ export default function BookingsPage() {
           </section>
         ) : null}
 
-        <section className="booking-list" aria-label="Customer bookings">
-          {bookings.map((booking) => (
-            <article
-              className="card booking-card"
-              key={booking.booking_id}
-              aria-labelledby={`booking-${booking.booking_id}`}
-            >
-              <div className="booking-card-header">
-                <div>
-                  <h2 id={`booking-${booking.booking_id}`}>
-                    {booking.court_name}
-                  </h2>
-                  <p>{booking.court_location}</p>
-                </div>
-                <span className="status-pill">
-                  {formatStatus(booking.status)}
-                </span>
-              </div>
-
-              <div className="grid two">
-                <div className="summary-list">
-                  <div className="summary-row">
-                    <span>Starts</span>
-                    <strong>{formatDateTime(booking.reservation_start_at)}</strong>
+        {!loading && !error && bookings.length > 0 ? (
+          <div className="booking-list">
+            {groupedBookings.map((group) => (
+              <section
+                className="booking-status-section"
+                key={group.status}
+                aria-labelledby={`bookings-${group.status}`}
+              >
+                <div className="booking-section-header">
+                  <div>
+                    <h2 id={`bookings-${group.status}`}>{group.title}</h2>
+                    <p>{group.description}</p>
                   </div>
-                  <div className="summary-row">
-                    <span>Ends</span>
-                    <strong>{formatDateTime(booking.reservation_end_at)}</strong>
-                  </div>
-                  <div className="summary-row">
-                    <span>Duration</span>
-                    <strong>{calculateDurationHours(booking)} hour(s)</strong>
-                  </div>
+                  <span className={`status-pill status-${group.status}`}>
+                    {group.bookings.length}
+                  </span>
                 </div>
 
-                <div className="summary-list">
-                  <div className="summary-row">
-                    <span>Total</span>
-                    <strong>{formatBnd(booking.total_amount_bnd)}</strong>
-                  </div>
-                  {booking.lock_expires_at ? (
-                    <div className="summary-row">
-                      <span>Lock expires</span>
-                      <strong>{formatDateTime(booking.lock_expires_at)}</strong>
-                    </div>
-                  ) : null}
-                  <div className="summary-row">
-                    <span>Booking ID</span>
-                    <strong>{booking.booking_id}</strong>
-                  </div>
-                </div>
-              </div>
-
-              <section aria-label="Booking slots">
-                <h3>Slots</h3>
-                {booking.slots.length === 0 ? (
-                  <p className="hint">
-                    No active slot rows are attached to this booking.
+                {group.bookings.length === 0 ? (
+                  <p className="empty-state">
+                    No {group.title.toLowerCase()} bookings.
                   </p>
                 ) : (
-                  <ul className="slot-list">
-                    {booking.slots.map((slot) => (
-                      <li key={`${slot.slot_date}-${slot.start_hour}`}>
-                        <span>
-                          {slot.slot_date} · {formatHour(slot.start_hour)}-
-                          {formatHour(slot.end_hour)}
-                        </span>
-                        <strong>
-                          {formatBnd(slot.price_bnd)} ·{" "}
-                          {formatStatus(slot.status)}
-                        </strong>
-                      </li>
+                  <div className="booking-list compact">
+                    {group.bookings.map((booking) => (
+                      <article
+                        className="card booking-card"
+                        key={booking.booking_id}
+                        aria-labelledby={`booking-${booking.booking_id}`}
+                      >
+                        <div className="booking-card-header">
+                          <div>
+                            <h3 id={`booking-${booking.booking_id}`}>
+                              {booking.court_name}
+                            </h3>
+                            <p>{booking.court_location}</p>
+                          </div>
+                          <span
+                            className={`status-pill status-${booking.status}`}
+                          >
+                            {formatStatus(booking.status)}
+                          </span>
+                        </div>
+
+                        <div className="grid two">
+                          <div className="summary-list">
+                            <div className="summary-row">
+                              <span>Starts</span>
+                              <strong>
+                                {formatDateTime(booking.reservation_start_at)}
+                              </strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Ends</span>
+                              <strong>
+                                {formatDateTime(booking.reservation_end_at)}
+                              </strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Duration</span>
+                              <strong>
+                                {calculateDurationHours(booking)} hour(s)
+                              </strong>
+                            </div>
+                          </div>
+
+                          <div className="summary-list">
+                            <div className="summary-row">
+                              <span>Total</span>
+                              <strong>
+                                {formatBnd(booking.total_amount_bnd)}
+                              </strong>
+                            </div>
+                            {booking.status === "locked" &&
+                            booking.lock_expires_at ? (
+                              <div className="summary-row">
+                                <span>Lock expires</span>
+                                <strong>
+                                  {formatDateTime(booking.lock_expires_at)}
+                                </strong>
+                              </div>
+                            ) : null}
+                            <div className="summary-row">
+                              <span>Booking ID</span>
+                              <strong>{booking.booking_id}</strong>
+                            </div>
+                          </div>
+                        </div>
+
+                        <section aria-label="Booking slots">
+                          <h4>Slots</h4>
+                          {booking.slots.length === 0 ? (
+                            <p className="hint">
+                              No active slot rows are attached to this booking.
+                            </p>
+                          ) : (
+                            <ul className="slot-list">
+                              {booking.slots.map((slot) => (
+                                <li
+                                  key={`${booking.booking_id}-${slot.slot_date}-${slot.start_hour}`}
+                                >
+                                  <span>
+                                    {slot.slot_date} -{" "}
+                                    {formatHour(slot.start_hour)}-
+                                    {formatHour(slot.end_hour)}
+                                  </span>
+                                  <strong>
+                                    {formatBnd(slot.price_bnd)} -{" "}
+                                    {formatStatus(slot.status)}
+                                  </strong>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </section>
+                      </article>
                     ))}
-                  </ul>
+                  </div>
                 )}
               </section>
-            </article>
-          ))}
-        </section>
+            ))}
+          </div>
+        ) : null}
       </section>
     </AuthGuard>
   );

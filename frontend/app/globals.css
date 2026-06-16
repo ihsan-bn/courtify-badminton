@@ -429,6 +429,33 @@ a:focus-visible {
   margin-top: 1.5rem;
 }
 
+.booking-list.compact {
+  margin-top: 1rem;
+}
+
+.booking-status-section {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.booking-section-header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.75rem;
+}
+
+.booking-section-header h2 {
+  margin: 0 0 0.25rem;
+}
+
+.booking-section-header p {
+  margin: 0;
+  color: var(--muted);
+}
+
 .booking-card {
   display: grid;
   gap: 1rem;
@@ -452,6 +479,31 @@ a:focus-visible {
   font-size: 0.82rem;
   font-weight: 800;
   text-transform: capitalize;
+}
+
+.status-confirmed {
+  color: #065f46;
+  background: #d1fae5;
+}
+
+.status-locked {
+  color: #92400e;
+  background: #fef3c7;
+}
+
+.status-expired {
+  color: #4b5563;
+  background: #e5e7eb;
+}
+
+.status-cancellation_requested {
+  color: #7c2d12;
+  background: #ffedd5;
+}
+
+.status-cancelled {
+  color: #991b1b;
+  background: #fee2e2;
 }
 
 .slot-list {

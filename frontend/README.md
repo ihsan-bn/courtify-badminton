@@ -46,6 +46,12 @@ The server remains the source of truth for availability, pricing, and conflict
 prevention. Duration options are capped by the court closing time and by the
 first unavailable slot after the selected start hour.
 
+## My Bookings
+
+The `/bookings` page calls `GET /api/bookings/me` and groups customer bookings
+by status: confirmed, locked, expired, cancellation requested, and cancelled.
+It is read-only in v0.6A; cancellation actions are intentionally not included.
+
 ## Stripe Checkout Flow
 
 After a temporary booking lock is created, `/book` calls
