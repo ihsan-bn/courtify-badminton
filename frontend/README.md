@@ -53,8 +53,12 @@ The `/bookings` page calls `GET /api/bookings/me` and groups customer bookings
 by status: confirmed, locked, expired, cancellation requested, and cancelled.
 Each card links to `/bookings/[bookingId]`, which loads the same customer-only
 booking history response and displays the matching booking details without
-calling admin endpoints. These pages are read-only in v0.6B; cancellation
-actions are intentionally not included.
+calling admin endpoints. In v0.6C, confirmed bookings that start at least 24
+hours from the current time show a customer cancellation action. The frontend
+shows the Courtify cancellation policy, asks for confirmation, and calls
+`POST /api/bookings/:bookingId/cancel` with a customer cancellation reason.
+The backend remains the authority for ownership, booking status, refund
+eligibility, and the 24-hour rule.
 
 ## Stripe Checkout Flow
 
