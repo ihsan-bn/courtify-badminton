@@ -114,6 +114,37 @@ async function createStripeCheckoutSession(
   }
 }
 
+async function expirePreviousCheckoutSession(
+  checkoutSessionId: string
+): Promise<void> {
+  try {
+    const checkoutSession =
+      await stripe.checkout.sessions.retrieve(checkoutSessionId);
+
+    if (checkoutSession.status === "complete") {
+      throw new ConflictError(
+        "The existing Checkout Session has already completed"
+      );
+    }
+    if (checkoutSession.status === "open") {
+      await stripe.checkout.sessions.expire(checkoutSessionId);
+    }
+  } catch (error) {
+    if (error instanceof ConflictError) {
+      throw error;
+    }
+    console.error(
+      `Failed to close previous Stripe Checkout Session ${checkoutSessionId}`,
+      error
+    );
+    throw new AppError(
+      502,
+      "PAYMENT_PROVIDER_ERROR",
+      "Unable to safely replace the existing Checkout Session"
+    );
+  }
+}
+
 function isSlotConflict(error: unknown): boolean {
   return (
     error instanceof DatabaseError &&
@@ -319,6 +350,10 @@ export const paymentsService = {
             client,
             booking.id
           );
+        }
+
+        if (previousCheckoutSessionId) {
+          await expirePreviousCheckoutSession(previousCheckoutSessionId);
         }
 
         const checkoutSession = await createStripeCheckoutSession(
@@ -553,10 +588,26 @@ export const paymentsService = {
         return;
       }
 
+      const expectedAmountCents = convertBndToCents(
+        booking.total_amount_bnd
+      );
+      if (
+        checkoutSession.mode !== "payment" ||
+        checkoutSession.payment_status !== "paid" ||
+        checkoutSession.currency?.toLowerCase() !== "bnd" ||
+        checkoutSession.amount_total !== expectedAmountCents
+      ) {
+        console.warn(
+          `Stripe checkout session ${checkoutSession.id} failed payment validation`
+        );
+        return;
+      }
+
+      const paymentCompletedAt = new Date(event.created * 1000);
       if (
         booking.status !== "locked" ||
         !booking.lock_expires_at ||
-        booking.lock_expires_at.getTime() <= Date.now()
+        booking.lock_expires_at.getTime() < paymentCompletedAt.getTime()
       ) {
         console.warn(
           `Booking ${booking.id} is not eligible for Stripe confirmation`
@@ -579,7 +630,8 @@ export const paymentsService = {
       const confirmed = await paymentsRepository.confirmBooking(
         client,
         booking.id,
-        paymentIntentId
+        paymentIntentId,
+        paymentCompletedAt
       );
       if (!confirmed) {
         console.warn(
@@ -588,7 +640,17 @@ export const paymentsService = {
         return;
       }
 
-      await paymentsRepository.confirmBookingSlots(client, booking.id);
+      const expectedSlotCount =
+        (booking.reservation_end_at.getTime() -
+          booking.reservation_start_at.getTime()) /
+        (60 * 60 * 1000);
+      const confirmedSlotCount =
+        await paymentsRepository.confirmBookingSlots(client, booking.id);
+      if (confirmedSlotCount !== expectedSlotCount) {
+        throw new Error(
+          `Booking ${booking.id} slot confirmation count mismatch`
+        );
+      }
     });
   }
 };

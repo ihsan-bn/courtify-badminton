@@ -59,3 +59,10 @@ audit record, which immediately makes those hours available again.
 The Phase 2 Express and TypeScript API is located in `backend/`. See
 `backend/README.md` for environment setup, commands, security requirements,
 and request examples.
+
+## Frontend
+
+The Phase 5A customer-facing Next.js app is located in `frontend/`. It includes
+the landing page, phone OTP login, first-time onboarding, and customer
+dashboard foundation. See `frontend/README.md` for setup and validation
+commands.

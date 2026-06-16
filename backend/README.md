@@ -161,9 +161,10 @@ a Stripe test payment while `stripe listen` is running.
 
 The webhook requires Stripe's raw request body and valid signature. Duplicate
 event IDs return HTTP `200` without reprocessing. A valid completed Checkout
-confirms only a still-locked booking, stores the payment intent ID, changes its
-hourly slots to `confirmed`, and records the verified event in
-`payment_events`.
+confirms only a still-locked booking after verifying payment mode, paid status,
+BND currency, and the database-authoritative amount. It stores the PaymentIntent
+ID, verifies every expected hourly slot was confirmed, and records the verified
+event in `payment_events`.
 
 Retry Checkout for an owned `locked` or `expired` booking:
 
@@ -176,7 +177,9 @@ curl -X POST http://localhost:3001/api/payments/retry-checkout-session \
 
 An unexpired lock receives a fresh Checkout Session. An expired booking is
 re-locked for ten minutes only when all original consecutive court slots are
-still available; otherwise the API returns HTTP `409`. Apply the
+still available; otherwise the API returns HTTP `409`. Any previous open
+Checkout Session is expired before its replacement is created so stale payment
+links cannot remain payable. Apply the
 `202606150001_allow_booking_relock.sql` migration before using this endpoint.
 
 List the authenticated customer's booking history:
@@ -276,6 +279,14 @@ curl -X POST http://localhost:3001/api/bookings/lock \
    full refund record is created and the deleted slots become available.
 6. Cancel a confirmed booking less than 24 hours away and verify no refund is
    created while the slots are still released.
+7. Replay a processed Stripe event ID and verify HTTP `200` without duplicate
+   booking, slot, payment event, or refund changes.
+8. Send a signed `checkout.session.completed` fixture with an unpaid status,
+   non-BND currency, or mismatched amount and verify the booking stays locked.
+9. Retry Checkout and verify the previous open Session becomes expired before
+   the new Session URL is returned.
+10. Verify `GET /health` returns HTTP `200`; verify `GET /health/db` returns
+    HTTP `200` with an online database and HTTP `503` when it is unavailable.
 
 Expired locks are ignored by availability even before cleanup. Cleanup runs
 once at startup and periodically thereafter, deleting only slots belonging to

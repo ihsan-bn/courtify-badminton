@@ -21,6 +21,9 @@ export interface WebhookBookingRecord {
   id: string;
   status: BookingStatus;
   lock_expires_at: Date | null;
+  total_amount_bnd: string;
+  reservation_start_at: Date;
+  reservation_end_at: Date;
 }
 
 export interface WebhookRefundRecord {
@@ -156,7 +159,13 @@ export const paymentsRepository = {
     const result = await queryWithClient<WebhookBookingRecord>(
       client,
       `
-        select id, status, lock_expires_at
+        select
+          id,
+          status,
+          lock_expires_at,
+          total_amount_bnd,
+          reservation_start_at,
+          reservation_end_at
         from public.bookings
         where stripe_checkout_session_id = $1
         for update
@@ -192,7 +201,13 @@ export const paymentsRepository = {
     const result = await queryWithClient<WebhookBookingRecord>(
       client,
       `
-        select id, status, lock_expires_at
+        select
+          id,
+          status,
+          lock_expires_at,
+          total_amount_bnd,
+          reservation_start_at,
+          reservation_end_at
         from public.bookings
         where stripe_payment_intent_id = $1
           or ($2::uuid is not null and id = $2)
@@ -422,7 +437,8 @@ export const paymentsRepository = {
   async confirmBooking(
     client: PoolClient,
     bookingId: string,
-    paymentIntentId: string
+    paymentIntentId: string,
+    paymentCompletedAt: Date
   ): Promise<boolean> {
     const result = await queryWithClient<{ id: string }>(
       client,
@@ -434,10 +450,10 @@ export const paymentsRepository = {
             updated_at = now()
         where id = $1
           and status = 'locked'
-          and lock_expires_at > clock_timestamp()
+          and lock_expires_at >= $3
         returning id
       `,
-      [bookingId, paymentIntentId]
+      [bookingId, paymentIntentId, paymentCompletedAt]
     );
 
     return result.rowCount === 1;
@@ -446,8 +462,8 @@ export const paymentsRepository = {
   async confirmBookingSlots(
     client: PoolClient,
     bookingId: string
-  ): Promise<void> {
-    await queryWithClient(
+  ): Promise<number> {
+    const result = await queryWithClient(
       client,
       `
         update public.booking_slots
@@ -457,5 +473,7 @@ export const paymentsRepository = {
       `,
       [bookingId]
     );
+
+    return result.rowCount ?? 0;
   }
 };
