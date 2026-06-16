@@ -39,6 +39,42 @@ export interface VerifyOtpResponse {
   onboarding_required: boolean;
 }
 
+export interface Court {
+  id: string;
+  name: string;
+  location: string;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AvailabilitySlot {
+  start_hour: number;
+  end_hour: number;
+  available: boolean;
+  price_bnd: string;
+  unavailable_reason: "booked" | null;
+}
+
+export interface AvailabilityResponse {
+  court: Court;
+  date: string;
+  slots: AvailabilitySlot[];
+}
+
+export interface BookingLockResponse {
+  booking_id: string;
+  status: "locked";
+  court_id: string;
+  slot_date: string;
+  start_hour: number;
+  duration_hours: number;
+  reservation_start_at: string;
+  reservation_end_at: string;
+  total_amount_bnd: string;
+  lock_expires_at: string;
+}
+
 export class ApiError extends Error {
   public constructor(
     message: string,

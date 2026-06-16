@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
@@ -100,7 +101,12 @@ export default function DashboardPage() {
         <section className="dashboard-grid" aria-label="Future booking tools">
           <article className="card">
             <h3>Book a Court</h3>
-            <p>Placeholder for selecting one court and consecutive hours.</p>
+            <p>Select one court and reserve consecutive hourly slots.</p>
+            <div className="actions">
+              <Link className="button-secondary" href="/book">
+                Start booking
+              </Link>
+            </div>
           </article>
           <article className="card">
             <h3>My Bookings</h3>
