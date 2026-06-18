@@ -2,21 +2,30 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import {
+  type FormEvent,
+  useCallback,
+  useEffect,
+  useState
+} from "react";
 
 import { AdminGuard } from "@/components/AdminGuard";
 import {
   apiFetch,
   ApiError,
   type AdminCancellationAction,
-  type AdminCancellationDetail
+  type AdminCancellationDetail,
+  type RefundMethod
 } from "@/lib/api";
 
 const ACTION_LABELS: Record<AdminCancellationAction, string> = {
   admin_verifying_cancellation: "Admin Verifying Cancellation",
   customer_contacted: "Customer Contacted",
   cancellation_approved: "Cancellation Approved",
-  cancellation_rejected: "Cancellation Rejected"
+  cancellation_rejected: "Cancellation Rejected",
+  refund_in_progress: "Refund In Progress",
+  refund_completed: "Refund Completed",
+  close_case: "Close Case"
 };
 
 const TIMELINE_LABELS: Record<string, string> = {
@@ -25,8 +34,19 @@ const TIMELINE_LABELS: Record<string, string> = {
   admin_verifying_cancellation: "Admin verifying cancellation",
   customer_contacted: "Customer contacted",
   cancellation_approved: "Cancellation approved",
-  cancellation_rejected: "Cancellation rejected"
+  cancellation_rejected: "Cancellation rejected",
+  refund_in_progress: "Refund in progress",
+  refund_completed: "Refund completed",
+  close_case: "Case closed"
 };
+
+const REFUND_METHODS: RefundMethod[] = [
+  "BIBD Transfer",
+  "Baiduri Transfer",
+  "Cash",
+  "Bank Transfer",
+  "Other"
+];
 
 function getRouteId(value: string | string[] | undefined): string {
   return Array.isArray(value) ? (value[0] ?? "") : (value ?? "");
@@ -64,6 +84,9 @@ export default function AdminCancellationDetailsPage() {
   const [success, setSuccess] = useState<string | null>(null);
   const [submittingAction, setSubmittingAction] =
     useState<AdminCancellationAction | null>(null);
+  const [refundMethod, setRefundMethod] = useState<RefundMethod | "">("");
+  const [refundReference, setRefundReference] = useState("");
+  const [refundNotes, setRefundNotes] = useState("");
 
   const loadRequest = useCallback(async () => {
     if (!requestId) {
@@ -94,7 +117,14 @@ export default function AdminCancellationDetailsPage() {
     void loadRequest();
   }, [loadRequest]);
 
-  async function applyAction(action: AdminCancellationAction) {
+  async function applyAction(
+    action: AdminCancellationAction,
+    refundDetails?: {
+      refund_method: RefundMethod;
+      refund_reference: string;
+      refund_notes: string;
+    }
+  ) {
     if (submittingAction) {
       return;
     }
@@ -106,7 +136,10 @@ export default function AdminCancellationDetailsPage() {
       await apiFetch(`/api/admin/cancellation-requests/${requestId}/events`, {
         method: "POST",
         auth: true,
-        body: { action }
+        body: {
+          action,
+          ...refundDetails
+        }
       });
       setSuccess(`${ACTION_LABELS[action]} recorded.`);
       await loadRequest();
@@ -121,7 +154,23 @@ export default function AdminCancellationDetailsPage() {
     }
   }
 
-  const pending = request?.status === "pending_admin_review";
+  function submitRefundCompleted(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!refundMethod || !refundReference.trim() || !refundNotes.trim()) {
+      return;
+    }
+
+    void applyAction("refund_completed", {
+      refund_method: refundMethod,
+      refund_reference: refundReference.trim(),
+      refund_notes: refundNotes.trim()
+    });
+  }
+
+  const reviewInProgress =
+    request?.status === "pending_admin_review" ||
+    request?.status === "admin_verifying" ||
+    request?.status === "customer_contacted";
 
   return (
     <AdminGuard>
@@ -130,8 +179,8 @@ export default function AdminCancellationDetailsPage() {
           <span className="eyebrow">Administrator</span>
           <h1 className="page-title">Cancellation review.</h1>
           <p className="lede">
-            Review the customer, booking, reserved slots, and cancellation
-            timeline before choosing a final action.
+            Review the cancellation case, record manual refund progress, and
+            keep the customer timeline current.
           </p>
           <div className="actions">
             <Link className="button-secondary" href="/admin/cancellations">
@@ -216,11 +265,11 @@ export default function AdminCancellationDetailsPage() {
                     {request.slots.map((slot) => (
                       <li key={`${slot.slot_date}-${slot.start_hour}`}>
                         <span>
-                          {slot.slot_date} · {formatHour(slot.start_hour)}-
+                          {slot.slot_date} - {formatHour(slot.start_hour)}-
                           {formatHour(slot.end_hour)}
                         </span>
                         <strong>
-                          {formatBnd(slot.price_bnd)} ·{" "}
+                          {formatBnd(slot.price_bnd)} -{" "}
                           {formatStatus(slot.status)}
                         </strong>
                       </li>
@@ -265,13 +314,54 @@ export default function AdminCancellationDetailsPage() {
             </section>
 
             <section className="card admin-action-card">
+              <div className="booking-card-header">
+                <div>
+                  <span className="eyebrow">Manual Refund</span>
+                  <h2>Refund details</h2>
+                </div>
+                <span className="status-pill">
+                  {formatStatus(request.status)}
+                </span>
+              </div>
+              <div className="summary-list">
+                <div className="summary-row">
+                  <span>Refund status</span>
+                  <strong>{formatStatus(request.status)}</strong>
+                </div>
+                <div className="summary-row">
+                  <span>Refund date</span>
+                  <strong>
+                    {request.refunded_at
+                      ? formatDateTime(request.refunded_at)
+                      : "Not completed"}
+                  </strong>
+                </div>
+                <div className="summary-row">
+                  <span>Refund method</span>
+                  <strong>{request.refund_method ?? "Not recorded"}</strong>
+                </div>
+                <div className="summary-row">
+                  <span>Refund reference</span>
+                  <strong className="reference-value">
+                    {request.refund_reference ?? "Not recorded"}
+                  </strong>
+                </div>
+                <div className="summary-row">
+                  <span>Refund notes</span>
+                  <strong className="reference-value">
+                    {request.refund_notes ?? "Not recorded"}
+                  </strong>
+                </div>
+              </div>
+            </section>
+
+            <section className="card admin-action-card">
               <h2>Administrator actions</h2>
-              {pending ? (
+              {reviewInProgress ? (
                 <>
                   <p>
-                    Progress updates appear immediately in the customer
-                    timeline. Approval releases slots; rejection restores the
-                    booking to confirmed.
+                    Record review progress, then approve or reject the
+                    cancellation.
                   </p>
                   <div className="actions">
                     <button
@@ -309,18 +399,121 @@ export default function AdminCancellationDetailsPage() {
                       Cancellation Rejected
                     </button>
                   </div>
-                  {submittingAction ? (
-                    <p className="loading">
-                      Recording {ACTION_LABELS[submittingAction]}...
-                    </p>
-                  ) : null}
+                </>
+              ) : request.status === "approved" ? (
+                <>
+                  <p>
+                    Cancellation is approved. Start tracking the manual refund
+                    when processing begins.
+                  </p>
+                  <div className="actions">
+                    <button
+                      className="button"
+                      type="button"
+                      disabled={submittingAction !== null}
+                      onClick={() => void applyAction("refund_in_progress")}
+                    >
+                      Refund In Progress
+                    </button>
+                  </div>
+                </>
+              ) : request.status === "refund_in_progress" ? (
+                <form
+                  className="refund-form"
+                  onSubmit={submitRefundCompleted}
+                >
+                  <p>
+                    Record the completed manual refund. All fields are
+                    required.
+                  </p>
+                  <div className="field">
+                    <label htmlFor="refund-method">Refund Method</label>
+                    <select
+                      id="refund-method"
+                      value={refundMethod}
+                      onChange={(event) =>
+                        setRefundMethod(event.target.value as RefundMethod | "")
+                      }
+                      disabled={submittingAction !== null}
+                      required
+                    >
+                      <option value="">Select refund method</option>
+                      {REFUND_METHODS.map((method) => (
+                        <option key={method} value={method}>
+                          {method}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="field">
+                    <label htmlFor="refund-reference">
+                      Refund Reference Number
+                    </label>
+                    <input
+                      id="refund-reference"
+                      value={refundReference}
+                      onChange={(event) =>
+                        setRefundReference(event.target.value)
+                      }
+                      maxLength={200}
+                      disabled={submittingAction !== null}
+                      required
+                    />
+                  </div>
+                  <div className="field">
+                    <label htmlFor="refund-notes">Refund Notes</label>
+                    <textarea
+                      id="refund-notes"
+                      value={refundNotes}
+                      onChange={(event) => setRefundNotes(event.target.value)}
+                      maxLength={2000}
+                      disabled={submittingAction !== null}
+                      required
+                    />
+                  </div>
+                  <div className="actions">
+                    <button
+                      className="button"
+                      type="submit"
+                      disabled={
+                        submittingAction !== null ||
+                        !refundMethod ||
+                        !refundReference.trim() ||
+                        !refundNotes.trim()
+                      }
+                    >
+                      Refund Completed
+                    </button>
+                  </div>
+                </form>
+              ) : request.status === "refund_completed" ? (
+                <>
+                  <p>
+                    The manual refund is recorded. Close the case after final
+                    review.
+                  </p>
+                  <div className="actions">
+                    <button
+                      className="button"
+                      type="button"
+                      disabled={submittingAction !== null}
+                      onClick={() => void applyAction("close_case")}
+                    >
+                      Close Case
+                    </button>
+                  </div>
                 </>
               ) : (
                 <p>
-                  This request has completed administrator review with status{" "}
+                  This case is read-only with status{" "}
                   <strong>{formatStatus(request.status)}</strong>.
                 </p>
               )}
+              {submittingAction ? (
+                <p className="loading">
+                  Recording {ACTION_LABELS[submittingAction]}...
+                </p>
+              ) : null}
             </section>
           </>
         ) : null}

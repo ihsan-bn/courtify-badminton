@@ -62,9 +62,9 @@ with the exact case-sensitive phrase `CANCEL BOOKING` before calling
 `POST /api/bookings/:bookingId/cancel`. After cancellation, the details page
 shows the booking as `cancellation_requested`, displays the pending admin
 review status and chronological customer-safe timeline, and hides the cancel
-button. Slots remain reserved and no refund begins until administrator
-approval is implemented. The backend remains the authority for ownership,
-booking status, refund eligibility, and the 24-hour rule.
+button. Slots remain reserved until administrator approval. The backend
+remains the authority for ownership, booking status, refund eligibility, and
+the 24-hour rule.
 
 Local test bookings cancelled before this status fix may already show as
 `cancelled` with removed slot rows. The frontend does not attempt to repair
@@ -73,11 +73,13 @@ that legacy data automatically.
 ## Administrator Cancellation Management
 
 Administrator pages verify the authenticated profile through `GET /api/me`.
-The queue lists pending requests and the detail page displays booking,
-customer, court, slot, and timeline information. Administrators can record
-verification and customer-contact progress, approve a cancellation to release
-slots, or reject it to restore the booking to confirmed. Refunds and
-notifications are intentionally deferred to v0.6E.
+The queue lists cancellation cases and the detail page displays booking,
+customer, court, slot, timeline, and manual refund information. Administrators
+can record verification and customer-contact progress, approve or reject a
+cancellation, mark a refund in progress, complete it with method, reference,
+and internal notes, then close the case. Customers see refund date, method,
+and reference but never see internal admin notes. Stripe automated refunds are
+not used.
 
 ## Stripe Checkout Flow
 
@@ -98,5 +100,5 @@ npm run build
 npm run lint
 ```
 
-This frontend intentionally does not include admin pages, notification
-delivery, or calendar invites yet.
+This frontend intentionally does not include notification delivery, calendar
+invites, or dashboard analytics yet.

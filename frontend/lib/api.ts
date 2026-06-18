@@ -107,8 +107,12 @@ export interface CancellationTimelineEvent {
 
 export type CancellationRequestStatus =
   | "pending_admin_review"
+  | "admin_verifying"
+  | "customer_contacted"
   | "approved"
+  | "refund_in_progress"
   | "refund_completed"
+  | "closed"
   | "rejected";
 
 export interface CustomerCancellationRequest {
@@ -118,6 +122,9 @@ export interface CustomerCancellationRequest {
   created_at: string;
   reviewed_at: string | null;
   reviewed_by?: string | null;
+  refund_method: RefundMethod | null;
+  refund_reference: string | null;
+  refunded_at: string | null;
   timeline: CancellationTimelineEvent[];
 }
 
@@ -172,6 +179,11 @@ export interface AdminCancellationSlot {
 
 export interface AdminCancellationDetail extends AdminCancellationQueueItem {
   booking_status: BookingStatus;
+  refund_method: RefundMethod | null;
+  refund_reference: string | null;
+  refund_notes: string | null;
+  refunded_at: string | null;
+  refunded_by: string | null;
   slots: AdminCancellationSlot[];
   timeline: Array<
     CancellationTimelineEvent & {
@@ -184,7 +196,17 @@ export type AdminCancellationAction =
   | "admin_verifying_cancellation"
   | "customer_contacted"
   | "cancellation_approved"
-  | "cancellation_rejected";
+  | "cancellation_rejected"
+  | "refund_in_progress"
+  | "refund_completed"
+  | "close_case";
+
+export type RefundMethod =
+  | "BIBD Transfer"
+  | "Baiduri Transfer"
+  | "Cash"
+  | "Bank Transfer"
+  | "Other";
 
 export class ApiError extends Error {
   public constructor(

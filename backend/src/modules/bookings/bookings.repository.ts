@@ -33,6 +33,16 @@ export type BookingSlotStatus =
   | "cancellation_requested"
   | "cancelled";
 
+export type CancellationRequestStatus =
+  | "pending_admin_review"
+  | "admin_verifying"
+  | "customer_contacted"
+  | "approved"
+  | "refund_in_progress"
+  | "refund_completed"
+  | "closed"
+  | "rejected";
+
 export interface BookingHistoryRow {
   booking_id: string;
   booking_status: BookingStatus;
@@ -81,28 +91,28 @@ export interface CancellationRequestRecord {
   booking_id: string;
   user_id: string;
   reason: string | null;
-  status:
-    | "pending_admin_review"
-    | "approved"
-    | "refund_completed"
-    | "rejected";
+  status: CancellationRequestStatus;
   created_at: Date;
   reviewed_at: Date | null;
   reviewed_by: string | null;
+  refund_method: string | null;
+  refund_reference: string | null;
+  refund_notes: string | null;
+  refunded_at: Date | null;
+  refunded_by: string | null;
 }
 
 export interface CustomerCancellationTimelineRow {
   booking_id: string;
   cancellation_request_id: string;
-  cancellation_status:
-    | "pending_admin_review"
-    | "approved"
-    | "refund_completed"
-    | "rejected";
+  cancellation_status: CancellationRequestStatus;
   cancellation_reason: string | null;
   cancellation_created_at: Date;
   cancellation_reviewed_at: Date | null;
   cancellation_reviewed_by: string | null;
+  refund_method: string | null;
+  refund_reference: string | null;
+  refunded_at: Date | null;
   event_id: string | null;
   event_type: string | null;
   event_message: string | null;
@@ -124,14 +134,15 @@ export interface AdminCancellationRequestRecord {
   reservation_end_at: Date;
   total_amount_bnd: string;
   reason: string | null;
-  status:
-    | "pending_admin_review"
-    | "approved"
-    | "refund_completed"
-    | "rejected";
+  status: CancellationRequestStatus;
   created_at: Date;
   reviewed_at: Date | null;
   reviewed_by: string | null;
+  refund_method: string | null;
+  refund_reference: string | null;
+  refund_notes: string | null;
+  refunded_at: Date | null;
+  refunded_by: string | null;
 }
 
 export interface AdminCancellationRequestDetailRecord
@@ -157,11 +168,7 @@ export interface CancellationEventRecord {
 export interface AdminCancellationRequestForUpdate {
   id: string;
   booking_id: string;
-  status:
-    | "pending_admin_review"
-    | "approved"
-    | "refund_completed"
-    | "rejected";
+  status: CancellationRequestStatus;
   booking_status: BookingStatus;
 }
 
@@ -519,7 +526,12 @@ export const bookingsRepository = {
           status,
           created_at,
           reviewed_at,
-          reviewed_by
+          reviewed_by,
+          refund_method,
+          refund_reference,
+          refund_notes,
+          refunded_at,
+          refunded_by
         from public.cancellation_requests
         where booking_id = $1
         order by created_at desc
@@ -555,7 +567,12 @@ export const bookingsRepository = {
           status,
           created_at,
           reviewed_at,
-          reviewed_by
+          reviewed_by,
+          refund_method,
+          refund_reference,
+          refund_notes,
+          refunded_at,
+          refunded_by
       `,
       [bookingId, customerUserId, reason]
     );
@@ -771,6 +788,9 @@ export const bookingsRepository = {
           cancellation_request.created_at as cancellation_created_at,
           cancellation_request.reviewed_at as cancellation_reviewed_at,
           cancellation_request.reviewed_by as cancellation_reviewed_by,
+          cancellation_request.refund_method,
+          cancellation_request.refund_reference,
+          cancellation_request.refunded_at,
           cancellation_event.id as event_id,
           cancellation_event.event_type,
           cancellation_event.message as event_message,
@@ -817,7 +837,12 @@ export const bookingsRepository = {
           cancellation_request.status,
           cancellation_request.created_at,
           cancellation_request.reviewed_at,
-          cancellation_request.reviewed_by
+          cancellation_request.reviewed_by,
+          cancellation_request.refund_method,
+          cancellation_request.refund_reference,
+          cancellation_request.refund_notes,
+          cancellation_request.refunded_at,
+          cancellation_request.refunded_by
         from public.cancellation_requests as cancellation_request
         inner join public.bookings as booking
           on booking.id = cancellation_request.booking_id
@@ -855,7 +880,12 @@ export const bookingsRepository = {
           cancellation_request.status,
           cancellation_request.created_at,
           cancellation_request.reviewed_at,
-          cancellation_request.reviewed_by
+          cancellation_request.reviewed_by,
+          cancellation_request.refund_method,
+          cancellation_request.refund_reference,
+          cancellation_request.refund_notes,
+          cancellation_request.refunded_at,
+          cancellation_request.refunded_by
         from public.cancellation_requests as cancellation_request
         inner join public.bookings as booking
           on booking.id = cancellation_request.booking_id
@@ -936,10 +966,10 @@ export const bookingsRepository = {
     return result.rows[0] ?? null;
   },
 
-  async completeCancellationReview(
+  async updateCancellationStatus(
     client: PoolClient,
     requestId: string,
-    status: "approved" | "rejected",
+    status: CancellationRequestStatus,
     reviewedBy: string
   ): Promise<void> {
     await queryWithClient(
@@ -947,12 +977,42 @@ export const bookingsRepository = {
       `
         update public.cancellation_requests
         set status = $2,
-            reviewed_at = now(),
-            reviewed_by = $3
+            reviewed_at = coalesce(reviewed_at, now()),
+            reviewed_by = coalesce(reviewed_by, $3)
         where id = $1
-          and status = 'pending_admin_review'
       `,
       [requestId, status, reviewedBy]
+    );
+  },
+
+  async completeManualRefund(
+    client: PoolClient,
+    requestId: string,
+    refundedBy: string,
+    refundMethod: string,
+    refundReference: string,
+    refundNotes: string
+  ): Promise<void> {
+    await queryWithClient(
+      client,
+      `
+        update public.cancellation_requests
+        set status = 'refund_completed',
+            refund_method = $3,
+            refund_reference = $4,
+            refund_notes = $5,
+            refunded_at = now(),
+            refunded_by = $2
+        where id = $1
+          and status = 'refund_in_progress'
+      `,
+      [
+        requestId,
+        refundedBy,
+        refundMethod,
+        refundReference,
+        refundNotes
+      ]
     );
   }
 };

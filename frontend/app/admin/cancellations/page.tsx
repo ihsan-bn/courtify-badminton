@@ -43,11 +43,7 @@ export default function AdminCancellationsPage() {
           cancellation_requests: AdminCancellationQueueItem[];
         }>("/api/admin/cancellation-requests", { auth: true });
         if (mounted) {
-          setRequests(
-            result.cancellation_requests.filter(
-              (request) => request.status === "pending_admin_review"
-            )
-          );
+          setRequests(result.cancellation_requests);
         }
       } catch (caught) {
         if (mounted) {
@@ -77,8 +73,8 @@ export default function AdminCancellationsPage() {
           <span className="eyebrow">Administrator</span>
           <h1 className="page-title">Cancellation queue.</h1>
           <p className="lede">
-            Review pending customer cancellation requests before releasing
-            reserved court slots.
+            Review customer cancellation cases from initial request through
+            manual refund completion and closure.
           </p>
           <div className="actions">
             <Link className="button-secondary" href="/dashboard">
@@ -98,8 +94,8 @@ export default function AdminCancellationsPage() {
 
         {!loading && !error && requests.length === 0 ? (
           <section className="empty-state">
-            <h2>No pending cancellation requests</h2>
-            <p>New customer requests will appear here for administrator review.</p>
+            <h2>No cancellation cases</h2>
+            <p>Customer cancellation and refund cases will appear here.</p>
           </section>
         ) : null}
 

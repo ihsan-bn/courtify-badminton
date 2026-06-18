@@ -230,13 +230,13 @@ Local test bookings cancelled before this status fix may already be marked
 `cancelled` with their slot rows removed. This release does not automatically
 repair that legacy test data.
 
-Verified `refund.updated` and `charge.refunded` webhooks update the associated
-`refund_records` row and are stored idempotently in `payment_events`. Apply the
-`202606150002_create_refund_records.sql` migration before enabling automated
-refunds. Apply `202606180001_create_cancellation_request_events.sql` before
+Courtify-Badminton refunds are tracked manually. The cancellation management
+workflow does not call Stripe refund APIs and does not trust client-supplied
+amounts. Apply `202606180001_create_cancellation_request_events.sql` before
 using the cancellation timeline. `GET /api/bookings/me` returns each
-customer's own cancellation request summary and chronological public timeline
-events only.
+customer's own cancellation request summary, chronological public timeline,
+and completed refund method, reference, and date. Internal refund notes are
+admin-only.
 
 List legacy manual cancellation requests as an administrator:
 
@@ -263,14 +263,37 @@ curl -X POST http://localhost:3001/api/admin/cancellation-requests/REQUEST_ID/ev
 ```
 
 Supported actions are `admin_verifying_cancellation`, `customer_contacted`,
-`cancellation_approved`, and `cancellation_rejected`. Approval changes the
-booking to `cancelled` and releases its slots. Rejection restores the booking
-to `confirmed` and preserves its slots. No Stripe refund or notification is
-created in v0.6D.
+`cancellation_approved`, `cancellation_rejected`, `refund_in_progress`,
+`refund_completed`, and `close_case`. Approval changes the booking to
+`cancelled` and releases its slots. Rejection restores the booking to
+`confirmed` and preserves its slots.
+
+Start manual refund processing:
+
+```bash
+curl -X POST http://localhost:3001/api/admin/cancellation-requests/REQUEST_ID/events \
+  -H "Authorization: Bearer ADMIN_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"action":"refund_in_progress"}'
+```
+
+Complete a manual refund:
+
+```bash
+curl -X POST http://localhost:3001/api/admin/cancellation-requests/REQUEST_ID/events \
+  -H "Authorization: Bearer ADMIN_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"action":"refund_completed","refund_method":"BIBD Transfer","refund_reference":"TRX-20260618-001","refund_notes":"Refund transferred to customer account."}'
+```
+
+Close the completed case with `{"action":"close_case"}`. No Stripe refund API
+is called by any cancellation management action.
 
 Apply `202606180002_add_cancellation_approved_status.sql` and then
 `202606180003_update_cancellation_review_constraint.sql` after the timeline
-migration before using the administrator approval action.
+migration. Apply `202606180004_add_manual_refund_statuses.sql` and
+`202606180005_add_manual_refund_fields.sql` before using manual refund
+tracking.
 
 List all courts as an administrator:
 

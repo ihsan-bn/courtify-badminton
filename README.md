@@ -12,7 +12,9 @@ supabase/
 |   |-- 202606150002_create_refund_records.sql
 |   |-- 202606180001_create_cancellation_request_events.sql
 |   |-- 202606180002_add_cancellation_approved_status.sql
-|   `-- 202606180003_update_cancellation_review_constraint.sql
+|   |-- 202606180003_update_cancellation_review_constraint.sql
+|   |-- 202606180004_add_manual_refund_statuses.sql
+|   `-- 202606180005_add_manual_refund_fields.sql
 `-- seed.sql
 ```
 

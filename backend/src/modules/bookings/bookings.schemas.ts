@@ -106,16 +106,40 @@ export const adminCancellationRequestParamsSchema = z
   })
   .strict();
 
-export const adminCancellationActionSchema = z
+export const refundMethods = [
+  "BIBD Transfer",
+  "Baiduri Transfer",
+  "Cash",
+  "Bank Transfer",
+  "Other"
+] as const;
+
+const cancellationProgressActionSchema = z
   .object({
     action: z.enum([
       "admin_verifying_cancellation",
       "customer_contacted",
       "cancellation_approved",
-      "cancellation_rejected"
+      "cancellation_rejected",
+      "refund_in_progress",
+      "close_case"
     ])
   })
   .strict();
+
+const refundCompletedActionSchema = z
+  .object({
+    action: z.literal("refund_completed"),
+    refund_method: z.enum(refundMethods),
+    refund_reference: z.string().trim().min(1).max(200),
+    refund_notes: z.string().trim().min(1).max(2000)
+  })
+  .strict();
+
+export const adminCancellationActionSchema = z.discriminatedUnion("action", [
+  cancellationProgressActionSchema,
+  refundCompletedActionSchema
+]);
 
 export type AdminCancellationActionInput = z.infer<
   typeof adminCancellationActionSchema

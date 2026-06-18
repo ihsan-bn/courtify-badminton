@@ -18,6 +18,7 @@ import {
   type BookingHistoryRow,
   type BookingSlotStatus,
   type BookingStatus,
+  type CancellationRequestStatus,
   type CustomerCancellationTimelineRow,
   type LockedBookingRecord
 } from "./bookings.repository.js";
@@ -60,15 +61,14 @@ interface CustomerCancellationTimelineEvent {
 
 interface CustomerCancellationRequest {
   cancellation_request_id: string;
-  status:
-    | "pending_admin_review"
-    | "approved"
-    | "refund_completed"
-    | "rejected";
+  status: CancellationRequestStatus;
   reason: string | null;
   created_at: string;
   reviewed_at: string | null;
   reviewed_by: string | null;
+  refund_method: string | null;
+  refund_reference: string | null;
+  refunded_at: string | null;
   timeline: CustomerCancellationTimelineEvent[];
 }
 
@@ -117,16 +117,8 @@ interface AdminCancellationRequestResult {
   reservation_end_at: string;
   total_amount_bnd: string;
   reason: string | null;
-  status:
-    | "pending_admin_review"
-    | "approved"
-    | "refund_completed"
-    | "rejected";
-  current_cancellation_status:
-    | "pending_admin_review"
-    | "approved"
-    | "refund_completed"
-    | "rejected";
+  status: CancellationRequestStatus;
+  current_cancellation_status: CancellationRequestStatus;
   booking_date: string;
   requested_at: string;
   created_at: string;
@@ -154,6 +146,11 @@ interface AdminCancellationEvent {
 interface AdminCancellationDetailResult
   extends AdminCancellationRequestResult {
   booking_status: BookingStatus;
+  refund_method: string | null;
+  refund_reference: string | null;
+  refund_notes: string | null;
+  refunded_at: string | null;
+  refunded_by: string | null;
   slots: AdminCancellationSlot[];
   timeline: AdminCancellationEvent[];
 }
@@ -162,11 +159,7 @@ interface AdminCancellationActionResult {
   cancellation_request_id: string;
   booking_id: string;
   booking_status: BookingStatus;
-  cancellation_status:
-    | "pending_admin_review"
-    | "approved"
-    | "refund_completed"
-    | "rejected";
+  cancellation_status: CancellationRequestStatus;
   action: AdminCancellationActionInput["action"];
 }
 
@@ -268,6 +261,9 @@ function groupCustomerBookings(
         reviewed_at:
           row.cancellation_reviewed_at?.toISOString() ?? null,
         reviewed_by: row.cancellation_reviewed_by,
+        refund_method: row.refund_method,
+        refund_reference: row.refund_reference,
+        refunded_at: row.refunded_at?.toISOString() ?? null,
         timeline: []
       };
       cancellationRequests.set(row.booking_id, cancellationRequest);
@@ -385,6 +381,11 @@ function formatAdminCancellationDetail(
   return {
     ...formatCancellationRequest(request),
     booking_status: request.booking_status,
+    refund_method: request.refund_method,
+    refund_reference: request.refund_reference,
+    refund_notes: request.refund_notes,
+    refunded_at: request.refunded_at?.toISOString() ?? null,
+    refunded_by: request.refunded_by,
     slots: slots.map(formatAdminCancellationSlot),
     timeline: timeline.map((event) => ({
       event_id: event.event_id,
@@ -634,10 +635,24 @@ export const bookingsService = {
         throw new NotFoundError("Cancellation request not found");
       }
 
+      const result = (
+        bookingStatus: BookingStatus,
+        cancellationStatus: CancellationRequestStatus
+      ): AdminCancellationActionResult => ({
+        cancellation_request_id: request.id,
+        booking_id: request.booking_id,
+        booking_status: bookingStatus,
+        cancellation_status: cancellationStatus,
+        action: input.action
+      });
+
       if (input.action === "admin_verifying_cancellation") {
+        if (request.status === "admin_verifying") {
+          return result(request.booking_status, request.status);
+        }
         if (request.status !== "pending_admin_review") {
           throw new ConflictError(
-            "Only pending cancellation requests can be updated"
+            "Only pending cancellation requests can be verified"
           );
         }
         await bookingsRepository.createCancellationRequestEvent(
@@ -649,19 +664,26 @@ export const bookingsService = {
           "admin",
           adminUserId
         );
-        return {
-          cancellation_request_id: request.id,
-          booking_id: request.booking_id,
-          booking_status: request.booking_status,
-          cancellation_status: request.status,
-          action: input.action
-        };
+        await bookingsRepository.updateCancellationStatus(
+          client,
+          request.id,
+          "admin_verifying",
+          adminUserId
+        );
+        return result(request.booking_status, "admin_verifying");
       }
 
       if (input.action === "customer_contacted") {
-        if (request.status !== "pending_admin_review") {
+        if (request.status === "customer_contacted") {
+          return result(request.booking_status, request.status);
+        }
+        if (
+          !["pending_admin_review", "admin_verifying"].includes(
+            request.status
+          )
+        ) {
           throw new ConflictError(
-            "Only pending cancellation requests can be updated"
+            "Customer contact can only be recorded during review"
           );
         }
         await bookingsRepository.createCancellationRequestEvent(
@@ -673,13 +695,13 @@ export const bookingsService = {
           "admin",
           adminUserId
         );
-        return {
-          cancellation_request_id: request.id,
-          booking_id: request.booking_id,
-          booking_status: request.booking_status,
-          cancellation_status: request.status,
-          action: input.action
-        };
+        await bookingsRepository.updateCancellationStatus(
+          client,
+          request.id,
+          "customer_contacted",
+          adminUserId
+        );
+        return result(request.booking_status, "customer_contacted");
       }
 
       if (input.action === "cancellation_approved") {
@@ -687,20 +709,18 @@ export const bookingsService = {
           request.status === "approved" &&
           request.booking_status === "cancelled"
         ) {
-          return {
-            cancellation_request_id: request.id,
-            booking_id: request.booking_id,
-            booking_status: request.booking_status,
-            cancellation_status: request.status,
-            action: input.action
-          };
+          return result(request.booking_status, request.status);
         }
         if (
-          request.status !== "pending_admin_review" ||
+          ![
+            "pending_admin_review",
+            "admin_verifying",
+            "customer_contacted"
+          ].includes(request.status) ||
           request.booking_status !== "cancellation_requested"
         ) {
           throw new ConflictError(
-            "Only pending cancellation requests can be approved"
+            "Only reviewed cancellation requests can be approved"
           );
         }
 
@@ -713,7 +733,7 @@ export const bookingsService = {
           "admin",
           adminUserId
         );
-        await bookingsRepository.completeCancellationReview(
+        await bookingsRepository.updateCancellationStatus(
           client,
           request.id,
           "approved",
@@ -727,64 +747,134 @@ export const bookingsService = {
           client,
           request.booking_id
         );
-
-        return {
-          cancellation_request_id: request.id,
-          booking_id: request.booking_id,
-          booking_status: "cancelled",
-          cancellation_status: "approved",
-          action: input.action
-        };
+        return result("cancelled", "approved");
       }
 
-      if (
-        request.status === "rejected" &&
-        request.booking_status === "confirmed"
-      ) {
-        return {
-          cancellation_request_id: request.id,
-          booking_id: request.booking_id,
-          booking_status: request.booking_status,
-          cancellation_status: request.status,
-          action: input.action
-        };
+      if (input.action === "cancellation_rejected") {
+        if (
+          request.status === "rejected" &&
+          request.booking_status === "confirmed"
+        ) {
+          return result(request.booking_status, request.status);
+        }
+        if (
+          ![
+            "pending_admin_review",
+            "admin_verifying",
+            "customer_contacted"
+          ].includes(request.status) ||
+          request.booking_status !== "cancellation_requested"
+        ) {
+          throw new ConflictError(
+            "Only reviewed cancellation requests can be rejected"
+          );
+        }
+
+        await bookingsRepository.createCancellationRequestEvent(
+          client,
+          request.id,
+          request.booking_id,
+          input.action,
+          "Cancellation rejected by administrator.",
+          "admin",
+          adminUserId
+        );
+        await bookingsRepository.updateCancellationStatus(
+          client,
+          request.id,
+          "rejected",
+          adminUserId
+        );
+        await bookingsRepository.restoreCancellationRequestedBooking(
+          client,
+          request.booking_id
+        );
+        return result("confirmed", "rejected");
       }
-      if (
-        request.status !== "pending_admin_review" ||
-        request.booking_status !== "cancellation_requested"
-      ) {
+
+      if (input.action === "refund_in_progress") {
+        if (request.status === "refund_in_progress") {
+          return result(request.booking_status, request.status);
+        }
+        if (
+          request.status !== "approved" ||
+          request.booking_status !== "cancelled"
+        ) {
+          throw new ConflictError(
+            "Refund tracking can begin only after cancellation approval"
+          );
+        }
+        await bookingsRepository.createCancellationRequestEvent(
+          client,
+          request.id,
+          request.booking_id,
+          input.action,
+          "Manual refund is in progress.",
+          "admin",
+          adminUserId
+        );
+        await bookingsRepository.updateCancellationStatus(
+          client,
+          request.id,
+          "refund_in_progress",
+          adminUserId
+        );
+        return result(request.booking_status, "refund_in_progress");
+      }
+
+      if (input.action === "refund_completed") {
+        if (request.status === "refund_completed") {
+          return result(request.booking_status, request.status);
+        }
+        if (request.status !== "refund_in_progress") {
+          throw new ConflictError(
+            "Refund can be completed only after it is in progress"
+          );
+        }
+        await bookingsRepository.completeManualRefund(
+          client,
+          request.id,
+          adminUserId,
+          input.refund_method,
+          input.refund_reference,
+          input.refund_notes
+        );
+        await bookingsRepository.createCancellationRequestEvent(
+          client,
+          request.id,
+          request.booking_id,
+          input.action,
+          "Manual refund completed.",
+          "admin",
+          adminUserId
+        );
+        return result(request.booking_status, "refund_completed");
+      }
+
+      if (request.status === "closed") {
+        return result(request.booking_status, request.status);
+      }
+      if (request.status !== "refund_completed") {
         throw new ConflictError(
-          "Only pending cancellation requests can be rejected"
+          "Case can be closed only after refund completion"
         );
       }
-
       await bookingsRepository.createCancellationRequestEvent(
         client,
         request.id,
         request.booking_id,
         input.action,
-        "Cancellation rejected by administrator.",
+        "Cancellation and refund case closed.",
         "admin",
         adminUserId
       );
-      await bookingsRepository.completeCancellationReview(
+      await bookingsRepository.updateCancellationStatus(
         client,
         request.id,
-        "rejected",
+        "closed",
         adminUserId
       );
-      await bookingsRepository.restoreCancellationRequestedBooking(
-        client,
-        request.booking_id
-      );
-
-      return {
-        cancellation_request_id: request.id,
-        booking_id: request.booking_id,
-        booking_status: "confirmed",
-        cancellation_status: "rejected",
-        action: input.action
-      };
+      return result(request.booking_status, "closed");
     });
   }
 };

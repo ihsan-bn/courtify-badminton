@@ -33,7 +33,9 @@ const TIMELINE_LABELS: Record<string, string> = {
   customer_contacted: "Customer contacted",
   cancellation_approved: "Cancellation approved",
   refund_processing: "Refund processing",
+  refund_in_progress: "Refund in progress",
   refund_completed: "Refund completed",
+  close_case: "Case closed",
   cancellation_case_closed: "Cancellation and refund case closed",
   cancellation_rejected: "Rejected"
 };
@@ -490,6 +492,33 @@ export default function BookingDetailsPage() {
                     </strong>
                   </div>
                 </div>
+
+                {booking.cancellation_request.refunded_at ? (
+                  <div className="summary-list">
+                    <div className="summary-row">
+                      <span>Refund date</span>
+                      <strong>
+                        {formatDateTime(
+                          booking.cancellation_request.refunded_at
+                        )}
+                      </strong>
+                    </div>
+                    <div className="summary-row">
+                      <span>Refund method</span>
+                      <strong>
+                        {booking.cancellation_request.refund_method ??
+                          "Not recorded"}
+                      </strong>
+                    </div>
+                    <div className="summary-row">
+                      <span>Refund reference</span>
+                      <strong className="reference-value">
+                        {booking.cancellation_request.refund_reference ??
+                          "Not recorded"}
+                      </strong>
+                    </div>
+                  </div>
+                ) : null}
 
                 {booking.cancellation_request.timeline.length === 0 ? (
                   <p className="empty-state">

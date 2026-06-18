@@ -41,13 +41,15 @@ a {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
 button:focus-visible,
 input:focus-visible,
 select:focus-visible,
+textarea:focus-visible,
 a:focus-visible {
   outline: 3px solid #7bdcb5;
   outline-offset: 3px;
@@ -269,6 +271,17 @@ a:focus-visible {
 
 .field select {
   width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+  padding: 0.9rem 1rem;
+  color: var(--text);
+  background: #ffffff;
+}
+
+.field textarea {
+  width: 100%;
+  min-height: 8rem;
+  resize: vertical;
   border: 1px solid var(--border);
   border-radius: 1rem;
   padding: 0.9rem 1rem;
@@ -498,6 +511,11 @@ a:focus-visible {
 
 .admin-action-card {
   margin-top: 1rem;
+}
+
+.refund-form {
+  display: grid;
+  gap: 1rem;
 }
 
 .danger-button {
