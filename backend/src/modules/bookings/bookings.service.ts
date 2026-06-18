@@ -1,10 +1,7 @@
 import { DatabaseError } from "pg";
-import type Stripe from "stripe";
 
 import { withTransaction } from "../../config/database.js";
-import { stripe } from "../../config/stripe.js";
 import {
-  AppError,
   ConflictError,
   ForbiddenError,
   NotFoundError
@@ -16,12 +13,16 @@ import {
 import {
   bookingsRepository,
   type AdminCancellationRequestRecord,
+  type AdminCancellationRequestDetailRecord,
+  type AdminCancellationSlotRecord,
   type BookingHistoryRow,
   type BookingSlotStatus,
   type BookingStatus,
+  type CustomerCancellationTimelineRow,
   type LockedBookingRecord
 } from "./bookings.repository.js";
 import {
+  type AdminCancellationActionInput,
   type AdminBookingsQuery,
   type CancelBookingInput,
   createBruneiSlotDateTime,
@@ -49,6 +50,28 @@ interface BookingHistorySlot {
   price_bnd: string;
 }
 
+interface CustomerCancellationTimelineEvent {
+  event_id: string;
+  event_type: string;
+  message: string;
+  actor_type: "customer" | "admin" | "system";
+  created_at: string;
+}
+
+interface CustomerCancellationRequest {
+  cancellation_request_id: string;
+  status:
+    | "pending_admin_review"
+    | "approved"
+    | "refund_completed"
+    | "rejected";
+  reason: string | null;
+  created_at: string;
+  reviewed_at: string | null;
+  reviewed_by: string | null;
+  timeline: CustomerCancellationTimelineEvent[];
+}
+
 interface CustomerBookingHistoryItem {
   booking_id: string;
   status: BookingStatus;
@@ -61,6 +84,7 @@ interface CustomerBookingHistoryItem {
   lock_expires_at: string | null;
   created_at: string;
   slots: BookingHistorySlot[];
+  cancellation_request: CustomerCancellationRequest | null;
 }
 
 interface AdminBookingHistoryItem extends CustomerBookingHistoryItem {
@@ -72,29 +96,20 @@ interface AdminBookingHistoryItem extends CustomerBookingHistoryItem {
 
 interface CancellationResult {
   booking_id: string;
-  status: "cancelled";
-  refund_eligible: boolean;
-  refund: {
-    refund_id: string;
-    stripe_refund_id: string | null;
-    amount_bnd: string;
-    status:
-      | "pending"
-      | "requires_action"
-      | "succeeded"
-      | "failed"
-      | "cancelled";
-  } | null;
+  status: "cancellation_requested" | "cancelled";
+  cancellation_request_id: string | null;
   reason: string | null;
 }
 
 interface AdminCancellationRequestResult {
+  request_id: string;
   cancellation_request_id: string;
   booking_id: string;
   user_id: string;
   customer_name: string | null;
   customer_email: string | null;
   customer_phone_number: string;
+  customer_phone: string;
   court_id: string;
   court_name: string;
   court_location: string;
@@ -102,10 +117,57 @@ interface AdminCancellationRequestResult {
   reservation_end_at: string;
   total_amount_bnd: string;
   reason: string | null;
-  status: "pending_admin_review" | "refund_completed" | "rejected";
+  status:
+    | "pending_admin_review"
+    | "approved"
+    | "refund_completed"
+    | "rejected";
+  current_cancellation_status:
+    | "pending_admin_review"
+    | "approved"
+    | "refund_completed"
+    | "rejected";
+  booking_date: string;
+  requested_at: string;
   created_at: string;
   reviewed_at: string | null;
   reviewed_by: string | null;
+}
+
+interface AdminCancellationSlot {
+  slot_date: string;
+  start_hour: number;
+  end_hour: number;
+  status: BookingSlotStatus;
+  price_bnd: string;
+}
+
+interface AdminCancellationEvent {
+  event_id: string;
+  event_type: string;
+  message: string;
+  actor_type: "customer" | "admin" | "system";
+  actor_user_id: string | null;
+  created_at: string;
+}
+
+interface AdminCancellationDetailResult
+  extends AdminCancellationRequestResult {
+  booking_status: BookingStatus;
+  slots: AdminCancellationSlot[];
+  timeline: AdminCancellationEvent[];
+}
+
+interface AdminCancellationActionResult {
+  cancellation_request_id: string;
+  booking_id: string;
+  booking_status: BookingStatus;
+  cancellation_status:
+    | "pending_admin_review"
+    | "approved"
+    | "refund_completed"
+    | "rejected";
+  action: AdminCancellationActionInput["action"];
 }
 
 function isSlotConflict(error: unknown): boolean {
@@ -114,42 +176,6 @@ function isSlotConflict(error: unknown): boolean {
     error.code === "23505" &&
     error.constraint === "booking_slots_court_date_hour_key"
   );
-}
-
-function convertBndToCents(amount: string): number {
-  const match = /^(\d{1,8})\.(\d{2})$/.exec(amount);
-  if (!match) {
-    throw new Error("Stored booking amount has an invalid format");
-  }
-
-  const totalCents = Number(match[1]) * 100 + Number(match[2]);
-  if (!Number.isSafeInteger(totalCents) || totalCents < 1) {
-    throw new Error("Stored booking amount is outside the supported range");
-  }
-  return totalCents;
-}
-
-function mapStripeRefundStatus(
-  status: Stripe.Refund["status"]
-):
-  | "pending"
-  | "requires_action"
-  | "succeeded"
-  | "failed"
-  | "cancelled" {
-  if (status === "requires_action") {
-    return "requires_action";
-  }
-  if (status === "succeeded") {
-    return "succeeded";
-  }
-  if (status === "failed") {
-    return "failed";
-  }
-  if (status === "canceled") {
-    return "cancelled";
-  }
-  return "pending";
 }
 
 function formatResult(
@@ -192,7 +218,8 @@ function formatSlot(row: BookingHistoryRow): BookingHistorySlot | null {
 }
 
 function groupCustomerBookings(
-  rows: BookingHistoryRow[]
+  rows: BookingHistoryRow[],
+  cancellationRows: CustomerCancellationTimelineRow[] = []
 ): CustomerBookingHistoryItem[] {
   const bookings = new Map<string, CustomerBookingHistoryItem>();
 
@@ -210,7 +237,8 @@ function groupCustomerBookings(
         reservation_end_at: row.reservation_end_at.toISOString(),
         lock_expires_at: row.lock_expires_at?.toISOString() ?? null,
         created_at: row.created_at.toISOString(),
-        slots: []
+        slots: [],
+        cancellation_request: null
       };
       bookings.set(row.booking_id, booking);
     }
@@ -218,6 +246,54 @@ function groupCustomerBookings(
     const slot = formatSlot(row);
     if (slot) {
       booking.slots.push(slot);
+    }
+  }
+
+  const cancellationRequests = new Map<
+    string,
+    CustomerCancellationRequest
+  >();
+
+  for (const row of cancellationRows) {
+    let cancellationRequest = cancellationRequests.get(row.booking_id);
+    if (
+      cancellationRequest?.cancellation_request_id !==
+        row.cancellation_request_id
+    ) {
+      cancellationRequest = {
+        cancellation_request_id: row.cancellation_request_id,
+        status: row.cancellation_status,
+        reason: row.cancellation_reason,
+        created_at: row.cancellation_created_at.toISOString(),
+        reviewed_at:
+          row.cancellation_reviewed_at?.toISOString() ?? null,
+        reviewed_by: row.cancellation_reviewed_by,
+        timeline: []
+      };
+      cancellationRequests.set(row.booking_id, cancellationRequest);
+    }
+
+    if (
+      row.event_id &&
+      row.event_type &&
+      row.event_message &&
+      row.event_actor_type &&
+      row.event_created_at
+    ) {
+      cancellationRequest.timeline.push({
+        event_id: row.event_id,
+        event_type: row.event_type,
+        message: row.event_message,
+        actor_type: row.event_actor_type,
+        created_at: row.event_created_at.toISOString()
+      });
+    }
+  }
+
+  for (const [bookingId, cancellationRequest] of cancellationRequests) {
+    const booking = bookings.get(bookingId);
+    if (booking) {
+      booking.cancellation_request = cancellationRequest;
     }
   }
 
@@ -256,13 +332,17 @@ function groupAdminBookings(
 function formatCancellationRequest(
   request: AdminCancellationRequestRecord
 ): AdminCancellationRequestResult {
+  const requestedAt = request.created_at.toISOString();
+
   return {
+    request_id: request.cancellation_request_id,
     cancellation_request_id: request.cancellation_request_id,
     booking_id: request.booking_id,
     user_id: request.user_id,
     customer_name: request.customer_name,
     customer_email: request.customer_email,
     customer_phone_number: request.customer_phone_number,
+    customer_phone: request.customer_phone_number,
     court_id: request.court_id,
     court_name: request.court_name,
     court_location: request.court_location,
@@ -271,9 +351,49 @@ function formatCancellationRequest(
     total_amount_bnd: request.total_amount_bnd,
     reason: request.reason,
     status: request.status,
-    created_at: request.created_at.toISOString(),
+    current_cancellation_status: request.status,
+    booking_date: request.reservation_start_at.toISOString().slice(0, 10),
+    requested_at: requestedAt,
+    created_at: requestedAt,
     reviewed_at: request.reviewed_at?.toISOString() ?? null,
     reviewed_by: request.reviewed_by
+  };
+}
+
+function formatAdminCancellationSlot(
+  slot: AdminCancellationSlotRecord
+): AdminCancellationSlot {
+  return {
+    slot_date: slot.slot_date,
+    start_hour: slot.start_hour,
+    end_hour: slot.start_hour + 1,
+    status: slot.status,
+    price_bnd: calculateSlotPriceBnd(
+      slot.slot_date,
+      slot.start_hour
+    ).toFixed(2)
+  };
+}
+
+function formatAdminCancellationDetail(
+  request: AdminCancellationRequestDetailRecord,
+  slots: AdminCancellationSlotRecord[],
+  timeline: Awaited<
+    ReturnType<typeof bookingsRepository.findCancellationRequestEvents>
+  >
+): AdminCancellationDetailResult {
+  return {
+    ...formatCancellationRequest(request),
+    booking_status: request.booking_status,
+    slots: slots.map(formatAdminCancellationSlot),
+    timeline: timeline.map((event) => ({
+      event_id: event.event_id,
+      event_type: event.event_type,
+      message: event.message,
+      actor_type: event.actor_type,
+      actor_user_id: event.actor_user_id,
+      created_at: event.created_at.toISOString()
+    }))
   };
 }
 
@@ -360,8 +480,11 @@ export const bookingsService = {
   async getCustomerHistory(
     userId: string
   ): Promise<CustomerBookingHistoryItem[]> {
-    const rows = await bookingsRepository.findCustomerBookings(userId);
-    return groupCustomerBookings(rows);
+    const [rows, cancellationRows] = await Promise.all([
+      bookingsRepository.findCustomerBookings(userId),
+      bookingsRepository.findCustomerCancellationTimeline(userId)
+    ]);
+    return groupCustomerBookings(rows, cancellationRows);
   },
 
   async getAdminBookings(
@@ -390,105 +513,83 @@ export const bookingsService = {
         throw new ForbiddenError("Booking belongs to another customer");
       }
 
-      const existingRefund = await bookingsRepository.findRefundByBooking(
-        client,
-        bookingId
-      );
+      const existingCancellationRequest =
+        await bookingsRepository.findCancellationRequestByBooking(
+          client,
+          bookingId
+        );
       if (booking.status === "cancelled") {
         return {
           booking_id: booking.id,
           status: "cancelled",
-          refund_eligible: existingRefund !== null,
-          refund: existingRefund
-            ? {
-                refund_id: existingRefund.id,
-                stripe_refund_id: existingRefund.stripe_refund_id,
-                amount_bnd: existingRefund.amount_bnd,
-                status: existingRefund.status
-              }
-            : null,
+          cancellation_request_id:
+            existingCancellationRequest?.id ?? null,
           reason: input.reason ?? null
+        };
+      }
+      if (
+        booking.status === "cancellation_requested" &&
+        existingCancellationRequest
+      ) {
+        return {
+          booking_id: booking.id,
+          status: "cancellation_requested",
+          cancellation_request_id: existingCancellationRequest.id,
+          reason: existingCancellationRequest.reason
         };
       }
       if (booking.status !== "confirmed") {
         throw new ConflictError("Only confirmed bookings can be cancelled");
       }
-      if (!booking.stripe_payment_intent_id) {
-        console.error(
-          `Confirmed booking ${booking.id} has no Stripe payment intent`
-        );
-        throw new AppError(
-          409,
-          "PAYMENT_NOT_VERIFIED",
-          "The booking payment cannot be verified"
+      if (
+        booking.reservation_start_at.getTime() <
+        Date.now() + 24 * 60 * 60 * 1000
+      ) {
+        throw new ConflictError(
+          "Cancellation is unavailable within 24 hours of the booking start time"
         );
       }
-
-      const refundEligible =
-        booking.reservation_start_at.getTime() >=
-        Date.now() + 24 * 60 * 60 * 1000;
-      let refundResult: CancellationResult["refund"] = null;
-
-      if (refundEligible) {
-        const refundRecord =
-          existingRefund ??
-          (await bookingsRepository.createPendingRefund(
-            client,
-            booking.id,
-            actorUserId,
-            booking.stripe_payment_intent_id,
-            booking.total_amount_bnd
-          ));
-
-        let stripeRefund: Stripe.Refund;
-        try {
-          stripeRefund = await stripe.refunds.create(
-            {
-              payment_intent: booking.stripe_payment_intent_id,
-              amount: convertBndToCents(booking.total_amount_bnd),
-              metadata: {
-                booking_id: booking.id,
-                requested_by: actorUserId
-              }
-            },
-            { idempotencyKey: `booking-refund:${booking.id}` }
-          );
-        } catch (error) {
-          console.error(
-            `Stripe refund request failed for booking ${booking.id}`,
-            error
-          );
-          throw new AppError(
-            502,
-            "REFUND_PROVIDER_ERROR",
-            "Unable to process the refund at this time"
-          );
-        }
-
-        const refundStatus = mapStripeRefundStatus(stripeRefund.status);
-        await bookingsRepository.updateRefundFromStripe(
+      const cancellationRequest =
+        existingCancellationRequest ??
+        (await bookingsRepository.createCancellationRequest(
           client,
-          refundRecord.id,
-          stripeRefund.id,
-          refundStatus,
-          stripeRefund.failure_reason ?? null
-        );
-        refundResult = {
-          refund_id: refundRecord.id,
-          stripe_refund_id: stripeRefund.id,
-          amount_bnd: refundRecord.amount_bnd,
-          status: refundStatus
-        };
-      }
+          booking.id,
+          booking.user_id,
+          input.reason ?? null
+        ));
 
-      await bookingsRepository.markBookingCancelled(client, booking.id);
-      await bookingsRepository.releaseBookingSlots(client, booking.id);
+      await bookingsRepository.createCancellationRequestEvent(
+        client,
+        cancellationRequest.id,
+        booking.id,
+        isAdmin
+          ? "admin_requested_cancellation"
+          : "customer_requested_cancellation",
+        isAdmin
+          ? "Administrator requested cancellation."
+          : "Customer requested cancellation.",
+        isAdmin ? "admin" : "customer",
+        actorUserId
+      );
+      await bookingsRepository.createCancellationRequestEvent(
+        client,
+        cancellationRequest.id,
+        booking.id,
+        "pending_admin_review",
+        "Cancellation request is pending admin review.",
+        "system",
+        null
+      );
+
+      await bookingsRepository.markBookingCancellationRequested(
+        client,
+        booking.id
+      );
 
       return {
         booking_id: booking.id,
-        status: "cancelled",
-        refund_eligible: refundEligible,
-        refund: refundResult,
+        status: "cancellation_requested",
+        cancellation_request_id: cancellationRequest.id,
         reason: input.reason ?? null
       };
     });
@@ -499,5 +600,191 @@ export const bookingsService = {
   > {
     const requests = await bookingsRepository.findCancellationRequests();
     return requests.map(formatCancellationRequest);
+  },
+
+  async getCancellationRequestDetail(
+    requestId: string
+  ): Promise<AdminCancellationDetailResult> {
+    const request =
+      await bookingsRepository.findCancellationRequestDetail(requestId);
+    if (!request) {
+      throw new NotFoundError("Cancellation request not found");
+    }
+
+    const [slots, timeline] = await Promise.all([
+      bookingsRepository.findCancellationRequestSlots(request.booking_id),
+      bookingsRepository.findCancellationRequestEvents(requestId)
+    ]);
+
+    return formatAdminCancellationDetail(request, slots, timeline);
+  },
+
+  async addCancellationAction(
+    adminUserId: string,
+    requestId: string,
+    input: AdminCancellationActionInput
+  ): Promise<AdminCancellationActionResult> {
+    return withTransaction(async (client) => {
+      const request =
+        await bookingsRepository.findCancellationRequestForUpdate(
+          client,
+          requestId
+        );
+      if (!request) {
+        throw new NotFoundError("Cancellation request not found");
+      }
+
+      if (input.action === "admin_verifying_cancellation") {
+        if (request.status !== "pending_admin_review") {
+          throw new ConflictError(
+            "Only pending cancellation requests can be updated"
+          );
+        }
+        await bookingsRepository.createCancellationRequestEvent(
+          client,
+          request.id,
+          request.booking_id,
+          input.action,
+          "Administrator is verifying the cancellation.",
+          "admin",
+          adminUserId
+        );
+        return {
+          cancellation_request_id: request.id,
+          booking_id: request.booking_id,
+          booking_status: request.booking_status,
+          cancellation_status: request.status,
+          action: input.action
+        };
+      }
+
+      if (input.action === "customer_contacted") {
+        if (request.status !== "pending_admin_review") {
+          throw new ConflictError(
+            "Only pending cancellation requests can be updated"
+          );
+        }
+        await bookingsRepository.createCancellationRequestEvent(
+          client,
+          request.id,
+          request.booking_id,
+          input.action,
+          "Customer contacted about the cancellation request.",
+          "admin",
+          adminUserId
+        );
+        return {
+          cancellation_request_id: request.id,
+          booking_id: request.booking_id,
+          booking_status: request.booking_status,
+          cancellation_status: request.status,
+          action: input.action
+        };
+      }
+
+      if (input.action === "cancellation_approved") {
+        if (
+          request.status === "approved" &&
+          request.booking_status === "cancelled"
+        ) {
+          return {
+            cancellation_request_id: request.id,
+            booking_id: request.booking_id,
+            booking_status: request.booking_status,
+            cancellation_status: request.status,
+            action: input.action
+          };
+        }
+        if (
+          request.status !== "pending_admin_review" ||
+          request.booking_status !== "cancellation_requested"
+        ) {
+          throw new ConflictError(
+            "Only pending cancellation requests can be approved"
+          );
+        }
+
+        await bookingsRepository.createCancellationRequestEvent(
+          client,
+          request.id,
+          request.booking_id,
+          input.action,
+          "Cancellation approved by administrator.",
+          "admin",
+          adminUserId
+        );
+        await bookingsRepository.completeCancellationReview(
+          client,
+          request.id,
+          "approved",
+          adminUserId
+        );
+        await bookingsRepository.markCancellationRequestedBookingCancelled(
+          client,
+          request.booking_id
+        );
+        await bookingsRepository.releaseBookingSlots(
+          client,
+          request.booking_id
+        );
+
+        return {
+          cancellation_request_id: request.id,
+          booking_id: request.booking_id,
+          booking_status: "cancelled",
+          cancellation_status: "approved",
+          action: input.action
+        };
+      }
+
+      if (
+        request.status === "rejected" &&
+        request.booking_status === "confirmed"
+      ) {
+        return {
+          cancellation_request_id: request.id,
+          booking_id: request.booking_id,
+          booking_status: request.booking_status,
+          cancellation_status: request.status,
+          action: input.action
+        };
+      }
+      if (
+        request.status !== "pending_admin_review" ||
+        request.booking_status !== "cancellation_requested"
+      ) {
+        throw new ConflictError(
+          "Only pending cancellation requests can be rejected"
+        );
+      }
+
+      await bookingsRepository.createCancellationRequestEvent(
+        client,
+        request.id,
+        request.booking_id,
+        input.action,
+        "Cancellation rejected by administrator.",
+        "admin",
+        adminUserId
+      );
+      await bookingsRepository.completeCancellationReview(
+        client,
+        request.id,
+        "rejected",
+        adminUserId
+      );
+      await bookingsRepository.restoreCancellationRequestedBooking(
+        client,
+        request.booking_id
+      );
+
+      return {
+        cancellation_request_id: request.id,
+        booking_id: request.booking_id,
+        booking_status: "confirmed",
+        cancellation_status: "rejected",
+        action: input.action
+      };
+    });
   }
 };

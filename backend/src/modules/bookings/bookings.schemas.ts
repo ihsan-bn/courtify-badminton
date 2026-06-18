@@ -99,3 +99,24 @@ export const cancelBookingBodySchema = z
   .strict();
 
 export type CancelBookingInput = z.infer<typeof cancelBookingBodySchema>;
+
+export const adminCancellationRequestParamsSchema = z
+  .object({
+    id: z.string().uuid()
+  })
+  .strict();
+
+export const adminCancellationActionSchema = z
+  .object({
+    action: z.enum([
+      "admin_verifying_cancellation",
+      "customer_contacted",
+      "cancellation_approved",
+      "cancellation_rejected"
+    ])
+  })
+  .strict();
+
+export type AdminCancellationActionInput = z.infer<
+  typeof adminCancellationActionSchema
+>;

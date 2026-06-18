@@ -490,6 +490,16 @@ a:focus-visible {
   margin: 0 0 0.5rem;
 }
 
+.cancellation-status-card {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.admin-action-card {
+  margin-top: 1rem;
+}
+
 .danger-button {
   background: var(--danger);
 }
@@ -577,6 +587,59 @@ a:focus-visible {
 
 .dialog-card h2 {
   margin: 0 0 1rem;
+}
+
+.dialog-card form {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.timeline-list {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.timeline-list li {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1rem minmax(0, 1fr);
+  gap: 0.75rem;
+  padding-bottom: 1.25rem;
+}
+
+.timeline-list li:not(:last-child)::before {
+  content: "";
+  position: absolute;
+  top: 0.8rem;
+  bottom: 0;
+  left: 0.42rem;
+  width: 2px;
+  background: var(--border);
+}
+
+.timeline-list p {
+  margin: 0.25rem 0;
+  color: var(--muted);
+}
+
+.timeline-list time {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.timeline-marker {
+  position: relative;
+  z-index: 1;
+  width: 0.85rem;
+  height: 0.85rem;
+  margin-top: 0.15rem;
+  border: 3px solid var(--primary-soft);
+  border-radius: 999px;
+  background: var(--primary);
 }
 
 @media (min-width: 760px) {

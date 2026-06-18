@@ -35,6 +35,8 @@ STRIPE_CANCEL_URL=http://localhost:3000/bookings/cancelled
 - `/bookings/[bookingId]` authenticated customer booking detail view
 - `/bookings/success` Stripe payment success landing page
 - `/bookings/cancelled` Stripe payment cancellation landing page
+- `/admin/cancellations` administrator cancellation request queue
+- `/admin/cancellations/[id]` administrator cancellation review and actions
 
 ## Booking Flow
 
@@ -55,10 +57,27 @@ Each card links to `/bookings/[bookingId]`, which loads the same customer-only
 booking history response and displays the matching booking details without
 calling admin endpoints. In v0.6C, confirmed bookings that start at least 24
 hours from the current time show a customer cancellation action. The frontend
-shows the Courtify cancellation policy, asks for confirmation, and calls
-`POST /api/bookings/:bookingId/cancel` with a customer cancellation reason.
-The backend remains the authority for ownership, booking status, refund
-eligibility, and the 24-hour rule.
+shows the Courtify cancellation policy, then requires a second confirmation
+with the exact case-sensitive phrase `CANCEL BOOKING` before calling
+`POST /api/bookings/:bookingId/cancel`. After cancellation, the details page
+shows the booking as `cancellation_requested`, displays the pending admin
+review status and chronological customer-safe timeline, and hides the cancel
+button. Slots remain reserved and no refund begins until administrator
+approval is implemented. The backend remains the authority for ownership,
+booking status, refund eligibility, and the 24-hour rule.
+
+Local test bookings cancelled before this status fix may already show as
+`cancelled` with removed slot rows. The frontend does not attempt to repair
+that legacy data automatically.
+
+## Administrator Cancellation Management
+
+Administrator pages verify the authenticated profile through `GET /api/me`.
+The queue lists pending requests and the detail page displays booking,
+customer, court, slot, and timeline information. Administrators can record
+verification and customer-contact progress, approve a cancellation to release
+slots, or reject it to restore the booking to confirmed. Refunds and
+notifications are intentionally deferred to v0.6E.
 
 ## Stripe Checkout Flow
 
@@ -79,5 +98,5 @@ npm run build
 npm run lint
 ```
 
-This frontend intentionally does not include admin pages, cancellation UI,
-notifications, or calendar invites yet.
+This frontend intentionally does not include admin pages, notification
+delivery, or calendar invites yet.

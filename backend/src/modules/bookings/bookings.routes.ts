@@ -6,13 +6,17 @@ import {
 } from "../../middleware/auth.js";
 import { validate } from "../../middleware/validate.js";
 import {
+  addCancellationRequestAction,
   cancelBooking,
   createBookingLock,
   getAdminBookings,
+  getCancellationRequestDetail,
   getCancellationRequests,
   getMyBookings
 } from "./bookings.controller.js";
 import {
+  adminCancellationActionSchema,
+  adminCancellationRequestParamsSchema,
   adminBookingsQuerySchema,
   cancelBookingBodySchema,
   cancelBookingParamsSchema,
@@ -56,4 +60,23 @@ adminCancellationRequestsRouter.get(
   authenticate,
   requireAdmin,
   getCancellationRequests
+);
+
+adminCancellationRequestsRouter.get(
+  "/:id",
+  authenticate,
+  requireAdmin,
+  validate({ params: adminCancellationRequestParamsSchema }),
+  getCancellationRequestDetail
+);
+
+adminCancellationRequestsRouter.post(
+  "/:id/events",
+  authenticate,
+  requireAdmin,
+  validate({
+    params: adminCancellationRequestParamsSchema,
+    body: adminCancellationActionSchema
+  }),
+  addCancellationRequestAction
 );

@@ -7,7 +7,12 @@ Database foundation for the Courtify-Badminton booking platform in Brunei.
 ```text
 supabase/
 |-- migrations/
-|   `-- 202606120001_create_courtify_database.sql
+|   |-- 202606120001_create_courtify_database.sql
+|   |-- 202606150001_allow_booking_relock.sql
+|   |-- 202606150002_create_refund_records.sql
+|   |-- 202606180001_create_cancellation_request_events.sql
+|   |-- 202606180002_add_cancellation_approved_status.sql
+|   `-- 202606180003_update_cancellation_review_constraint.sql
 `-- seed.sql
 ```
 
@@ -42,7 +47,7 @@ supabase db reset
 ## Run in the Supabase dashboard
 
 1. Open the project's SQL Editor.
-2. Run `supabase/migrations/202606120001_create_courtify_database.sql`.
+2. Run each file in `supabase/migrations/` in filename order.
 3. Run `supabase/seed.sql`.
 
 Row-level security is enabled on every application table without public client

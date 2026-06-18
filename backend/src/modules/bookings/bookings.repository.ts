@@ -76,6 +76,40 @@ export interface RefundRecord {
   created_at: Date;
 }
 
+export interface CancellationRequestRecord {
+  id: string;
+  booking_id: string;
+  user_id: string;
+  reason: string | null;
+  status:
+    | "pending_admin_review"
+    | "approved"
+    | "refund_completed"
+    | "rejected";
+  created_at: Date;
+  reviewed_at: Date | null;
+  reviewed_by: string | null;
+}
+
+export interface CustomerCancellationTimelineRow {
+  booking_id: string;
+  cancellation_request_id: string;
+  cancellation_status:
+    | "pending_admin_review"
+    | "approved"
+    | "refund_completed"
+    | "rejected";
+  cancellation_reason: string | null;
+  cancellation_created_at: Date;
+  cancellation_reviewed_at: Date | null;
+  cancellation_reviewed_by: string | null;
+  event_id: string | null;
+  event_type: string | null;
+  event_message: string | null;
+  event_actor_type: "customer" | "admin" | "system" | null;
+  event_created_at: Date | null;
+}
+
 export interface AdminCancellationRequestRecord {
   cancellation_request_id: string;
   booking_id: string;
@@ -90,10 +124,45 @@ export interface AdminCancellationRequestRecord {
   reservation_end_at: Date;
   total_amount_bnd: string;
   reason: string | null;
-  status: "pending_admin_review" | "refund_completed" | "rejected";
+  status:
+    | "pending_admin_review"
+    | "approved"
+    | "refund_completed"
+    | "rejected";
   created_at: Date;
   reviewed_at: Date | null;
   reviewed_by: string | null;
+}
+
+export interface AdminCancellationRequestDetailRecord
+  extends AdminCancellationRequestRecord {
+  booking_status: BookingStatus;
+}
+
+export interface AdminCancellationSlotRecord {
+  slot_date: string;
+  start_hour: number;
+  status: BookingSlotStatus;
+}
+
+export interface CancellationEventRecord {
+  event_id: string;
+  event_type: string;
+  message: string;
+  actor_type: "customer" | "admin" | "system";
+  actor_user_id: string | null;
+  created_at: Date;
+}
+
+export interface AdminCancellationRequestForUpdate {
+  id: string;
+  booking_id: string;
+  status:
+    | "pending_admin_review"
+    | "approved"
+    | "refund_completed"
+    | "rejected";
+  booking_status: BookingStatus;
 }
 
 interface ExpiredBookingRecord {
@@ -435,6 +504,109 @@ export const bookingsRepository = {
     return result.rows[0] ?? null;
   },
 
+  async findCancellationRequestByBooking(
+    client: PoolClient,
+    bookingId: string
+  ): Promise<CancellationRequestRecord | null> {
+    const result = await queryWithClient<CancellationRequestRecord>(
+      client,
+      `
+        select
+          id,
+          booking_id,
+          user_id,
+          reason,
+          status,
+          created_at,
+          reviewed_at,
+          reviewed_by
+        from public.cancellation_requests
+        where booking_id = $1
+        order by created_at desc
+        limit 1
+      `,
+      [bookingId]
+    );
+
+    return result.rows[0] ?? null;
+  },
+
+  async createCancellationRequest(
+    client: PoolClient,
+    bookingId: string,
+    customerUserId: string,
+    reason: string | null
+  ): Promise<CancellationRequestRecord> {
+    const result = await queryWithClient<CancellationRequestRecord>(
+      client,
+      `
+        insert into public.cancellation_requests (
+          booking_id,
+          user_id,
+          reason,
+          status
+        )
+        values ($1, $2, $3, 'pending_admin_review')
+        returning
+          id,
+          booking_id,
+          user_id,
+          reason,
+          status,
+          created_at,
+          reviewed_at,
+          reviewed_by
+      `,
+      [bookingId, customerUserId, reason]
+    );
+
+    const cancellationRequest = result.rows[0];
+    if (!cancellationRequest) {
+      throw new Error("Cancellation request insert did not return a row");
+    }
+
+    return cancellationRequest;
+  },
+
+  async createCancellationRequestEvent(
+    client: PoolClient,
+    cancellationRequestId: string,
+    bookingId: string,
+    eventType: string,
+    message: string,
+    actorType: "customer" | "admin" | "system",
+    actorUserId: string | null
+  ): Promise<void> {
+    await queryWithClient(
+      client,
+      `
+        insert into public.cancellation_request_events (
+          cancellation_request_id,
+          booking_id,
+          event_type,
+          message,
+          actor_type,
+          actor_user_id
+        )
+        select $1, $2, $3, $4, $5, $6
+        where not exists (
+          select 1
+          from public.cancellation_request_events
+          where cancellation_request_id = $1
+            and event_type = $3
+        )
+      `,
+      [
+        cancellationRequestId,
+        bookingId,
+        eventType,
+        message,
+        actorType,
+        actorUserId
+      ]
+    );
+  },
+
   async createPendingRefund(
     client: PoolClient,
     bookingId: string,
@@ -493,6 +665,23 @@ export const bookingsRepository = {
     );
   },
 
+  async markBookingCancellationRequested(
+    client: PoolClient,
+    bookingId: string
+  ): Promise<void> {
+    await queryWithClient(
+      client,
+      `
+        update public.bookings
+        set status = 'cancellation_requested',
+            lock_expires_at = null
+        where id = $1
+          and status = 'confirmed'
+      `,
+      [bookingId]
+    );
+  },
+
   async markBookingCancelled(
     client: PoolClient,
     bookingId: string
@@ -505,6 +694,40 @@ export const bookingsRepository = {
             lock_expires_at = null
         where id = $1
           and status = 'confirmed'
+      `,
+      [bookingId]
+    );
+  },
+
+  async markCancellationRequestedBookingCancelled(
+    client: PoolClient,
+    bookingId: string
+  ): Promise<void> {
+    await queryWithClient(
+      client,
+      `
+        update public.bookings
+        set status = 'cancelled',
+            lock_expires_at = null
+        where id = $1
+          and status = 'cancellation_requested'
+      `,
+      [bookingId]
+    );
+  },
+
+  async restoreCancellationRequestedBooking(
+    client: PoolClient,
+    bookingId: string
+  ): Promise<void> {
+    await queryWithClient(
+      client,
+      `
+        update public.bookings
+        set status = 'confirmed',
+            lock_expires_at = null
+        where id = $1
+          and status = 'cancellation_requested'
       `,
       [bookingId]
     );
@@ -533,6 +756,43 @@ export const bookingsRepository = {
       `,
       [bookingId]
     );
+  },
+
+  async findCustomerCancellationTimeline(
+    userId: string
+  ): Promise<CustomerCancellationTimelineRow[]> {
+    const result = await query<CustomerCancellationTimelineRow>(
+      `
+        select
+          cancellation_request.booking_id,
+          cancellation_request.id as cancellation_request_id,
+          cancellation_request.status as cancellation_status,
+          cancellation_request.reason as cancellation_reason,
+          cancellation_request.created_at as cancellation_created_at,
+          cancellation_request.reviewed_at as cancellation_reviewed_at,
+          cancellation_request.reviewed_by as cancellation_reviewed_by,
+          cancellation_event.id as event_id,
+          cancellation_event.event_type,
+          cancellation_event.message as event_message,
+          cancellation_event.actor_type as event_actor_type,
+          cancellation_event.created_at as event_created_at
+        from public.cancellation_requests as cancellation_request
+        inner join public.bookings as booking
+          on booking.id = cancellation_request.booking_id
+        left join public.cancellation_request_events as cancellation_event
+          on cancellation_event.cancellation_request_id =
+            cancellation_request.id
+        where booking.user_id = $1
+          and cancellation_request.user_id = $1
+        order by
+          cancellation_request.created_at asc,
+          cancellation_event.created_at asc,
+          cancellation_event.id asc
+      `,
+      [userId]
+    );
+
+    return result.rows;
   },
 
   async findCancellationRequests(): Promise<
@@ -570,5 +830,129 @@ export const bookingsRepository = {
     );
 
     return result.rows;
+  },
+
+  async findCancellationRequestDetail(
+    requestId: string
+  ): Promise<AdminCancellationRequestDetailRecord | null> {
+    const result = await query<AdminCancellationRequestDetailRecord>(
+      `
+        select
+          cancellation_request.id as cancellation_request_id,
+          cancellation_request.booking_id,
+          cancellation_request.user_id,
+          customer.name as customer_name,
+          customer.email as customer_email,
+          customer.phone_number as customer_phone_number,
+          booking.court_id,
+          court.name as court_name,
+          court.location as court_location,
+          booking.status as booking_status,
+          booking.reservation_start_at,
+          booking.reservation_end_at,
+          booking.total_amount_bnd,
+          cancellation_request.reason,
+          cancellation_request.status,
+          cancellation_request.created_at,
+          cancellation_request.reviewed_at,
+          cancellation_request.reviewed_by
+        from public.cancellation_requests as cancellation_request
+        inner join public.bookings as booking
+          on booking.id = cancellation_request.booking_id
+        inner join public.users as customer
+          on customer.id = cancellation_request.user_id
+        inner join public.courts as court
+          on court.id = booking.court_id
+        where cancellation_request.id = $1
+      `,
+      [requestId]
+    );
+
+    return result.rows[0] ?? null;
+  },
+
+  async findCancellationRequestSlots(
+    bookingId: string
+  ): Promise<AdminCancellationSlotRecord[]> {
+    const result = await query<AdminCancellationSlotRecord>(
+      `
+        select
+          slot_date::text as slot_date,
+          start_hour,
+          status
+        from public.booking_slots
+        where booking_id = $1
+        order by slot_date asc, start_hour asc
+      `,
+      [bookingId]
+    );
+
+    return result.rows;
+  },
+
+  async findCancellationRequestEvents(
+    requestId: string
+  ): Promise<CancellationEventRecord[]> {
+    const result = await query<CancellationEventRecord>(
+      `
+        select
+          id as event_id,
+          event_type,
+          message,
+          actor_type,
+          actor_user_id,
+          created_at
+        from public.cancellation_request_events
+        where cancellation_request_id = $1
+        order by created_at asc, id asc
+      `,
+      [requestId]
+    );
+
+    return result.rows;
+  },
+
+  async findCancellationRequestForUpdate(
+    client: PoolClient,
+    requestId: string
+  ): Promise<AdminCancellationRequestForUpdate | null> {
+    const result = await queryWithClient<AdminCancellationRequestForUpdate>(
+      client,
+      `
+        select
+          cancellation_request.id,
+          cancellation_request.booking_id,
+          cancellation_request.status,
+          booking.status as booking_status
+        from public.cancellation_requests as cancellation_request
+        inner join public.bookings as booking
+          on booking.id = cancellation_request.booking_id
+        where cancellation_request.id = $1
+        for update of cancellation_request, booking
+      `,
+      [requestId]
+    );
+
+    return result.rows[0] ?? null;
+  },
+
+  async completeCancellationReview(
+    client: PoolClient,
+    requestId: string,
+    status: "approved" | "rejected",
+    reviewedBy: string
+  ): Promise<void> {
+    await queryWithClient(
+      client,
+      `
+        update public.cancellation_requests
+        set status = $2,
+            reviewed_at = now(),
+            reviewed_by = $3
+        where id = $1
+          and status = 'pending_admin_review'
+      `,
+      [requestId, status, reviewedBy]
+    );
   }
 };

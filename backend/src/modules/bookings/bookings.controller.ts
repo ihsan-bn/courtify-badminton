@@ -5,6 +5,7 @@ import {
   UnauthorizedError
 } from "../../utils/errors.js";
 import type {
+  AdminCancellationActionInput,
   CancelBookingInput,
   CreateBookingLockInput
 } from "./bookings.schemas.js";
@@ -73,4 +74,32 @@ export const getCancellationRequests: RequestHandler = async (
   const cancellationRequests =
     await bookingsService.getCancellationRequests();
   response.status(200).json({ cancellation_requests: cancellationRequests });
+};
+
+export const getCancellationRequestDetail: RequestHandler = async (
+  request,
+  response
+) => {
+  const cancellationRequest =
+    await bookingsService.getCancellationRequestDetail(
+      request.params.id as string
+    );
+  response.status(200).json({ cancellation_request: cancellationRequest });
+};
+
+export const addCancellationRequestAction: RequestHandler = async (
+  request,
+  response
+) => {
+  const authenticatedUser = request.authenticatedUser;
+  if (!authenticatedUser) {
+    throw new UnauthorizedError();
+  }
+
+  const result = await bookingsService.addCancellationAction(
+    authenticatedUser.id,
+    request.params.id as string,
+    request.body as AdminCancellationActionInput
+  );
+  response.status(200).json(result);
 };

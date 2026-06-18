@@ -99,6 +99,20 @@ export default function DashboardPage() {
         ) : null}
 
         <section className="dashboard-grid" aria-label="Future booking tools">
+          {user?.role === "admin" ? (
+            <article className="card">
+              <h3>Cancellation Management</h3>
+              <p>Review pending requests and update customer timelines.</p>
+              <div className="actions">
+                <Link
+                  className="button-secondary"
+                  href="/admin/cancellations"
+                >
+                  Open cancellation queue
+                </Link>
+              </div>
+            </article>
+          ) : null}
           <article className="card">
             <h3>Book a Court</h3>
             <p>Select one court and reserve consecutive hourly slots.</p>

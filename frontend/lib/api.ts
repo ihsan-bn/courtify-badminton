@@ -97,6 +97,30 @@ export interface BookingHistorySlot {
   price_bnd: string;
 }
 
+export interface CancellationTimelineEvent {
+  event_id: string;
+  event_type: string;
+  message: string;
+  actor_type: "customer" | "admin" | "system";
+  created_at: string;
+}
+
+export type CancellationRequestStatus =
+  | "pending_admin_review"
+  | "approved"
+  | "refund_completed"
+  | "rejected";
+
+export interface CustomerCancellationRequest {
+  cancellation_request_id: string;
+  status: CancellationRequestStatus;
+  reason: string | null;
+  created_at: string;
+  reviewed_at: string | null;
+  reviewed_by?: string | null;
+  timeline: CancellationTimelineEvent[];
+}
+
 export interface CustomerBooking {
   booking_id: string;
   status: BookingStatus;
@@ -110,7 +134,57 @@ export interface CustomerBooking {
   stripe_checkout_session_id?: string | null;
   created_at: string;
   slots: BookingHistorySlot[];
+  cancellation_request?: CustomerCancellationRequest | null;
 }
+
+export interface AdminCancellationQueueItem {
+  request_id: string;
+  cancellation_request_id: string;
+  booking_id: string;
+  user_id: string;
+  customer_name: string | null;
+  customer_email: string | null;
+  customer_phone_number: string;
+  customer_phone: string;
+  court_id: string;
+  court_name: string;
+  court_location: string;
+  reservation_start_at: string;
+  reservation_end_at: string;
+  total_amount_bnd: string;
+  reason: string | null;
+  status: CancellationRequestStatus;
+  current_cancellation_status: CancellationRequestStatus;
+  booking_date: string;
+  requested_at: string;
+  created_at: string;
+  reviewed_at: string | null;
+  reviewed_by: string | null;
+}
+
+export interface AdminCancellationSlot {
+  slot_date: string;
+  start_hour: number;
+  end_hour: number;
+  status: BookingHistorySlot["status"];
+  price_bnd: string;
+}
+
+export interface AdminCancellationDetail extends AdminCancellationQueueItem {
+  booking_status: BookingStatus;
+  slots: AdminCancellationSlot[];
+  timeline: Array<
+    CancellationTimelineEvent & {
+      actor_user_id: string | null;
+    }
+  >;
+}
+
+export type AdminCancellationAction =
+  | "admin_verifying_cancellation"
+  | "customer_contacted"
+  | "cancellation_approved"
+  | "cancellation_rejected";
 
 export class ApiError extends Error {
   public constructor(

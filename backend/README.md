@@ -215,17 +215,28 @@ curl -X POST http://localhost:3001/api/bookings/BOOKING_ID/cancel \
 Customers can cancel only their own bookings. Administrators using an admin
 access token can cancel any confirmed booking through the same endpoint.
 
-When cancellation occurs at least 24 hours before the reservation starts, the
-server submits a full Stripe refund using the stored PaymentIntent and
-database-authoritative BND amount. Stripe and database idempotency prevent
-duplicate refunds. Later cancellations receive no refund. In both cases the
-booking becomes `cancelled` and its hourly slot rows are deleted atomically so
-the court becomes immediately available.
+Cancellation is accepted only when the reservation starts at least 24 hours
+from the current time. Requests inside the 24-hour window return HTTP `409`;
+the booking, refund state, and occupied slots remain unchanged.
+
+For an eligible customer request, the server creates a cancellation request
+and customer-safe timeline events, then changes the booking status to
+`cancellation_requested`. Confirmed hourly slot rows remain attached and
+reserved. No Stripe refund, refund record, final cancellation, or slot release
+occurs until a future administrator approval workflow explicitly performs
+those actions.
+
+Local test bookings cancelled before this status fix may already be marked
+`cancelled` with their slot rows removed. This release does not automatically
+repair that legacy test data.
 
 Verified `refund.updated` and `charge.refunded` webhooks update the associated
 `refund_records` row and are stored idempotently in `payment_events`. Apply the
 `202606150002_create_refund_records.sql` migration before enabling automated
-refunds.
+refunds. Apply `202606180001_create_cancellation_request_events.sql` before
+using the cancellation timeline. `GET /api/bookings/me` returns each
+customer's own cancellation request summary and chronological public timeline
+events only.
 
 List legacy manual cancellation requests as an administrator:
 
@@ -233,6 +244,33 @@ List legacy manual cancellation requests as an administrator:
 curl http://localhost:3001/api/admin/cancellation-requests \
   -H "Authorization: Bearer ADMIN_ACCESS_TOKEN"
 ```
+
+Get one cancellation request with booking, customer, court, slot, and timeline
+details:
+
+```bash
+curl http://localhost:3001/api/admin/cancellation-requests/REQUEST_ID \
+  -H "Authorization: Bearer ADMIN_ACCESS_TOKEN"
+```
+
+Record an administrator workflow action:
+
+```bash
+curl -X POST http://localhost:3001/api/admin/cancellation-requests/REQUEST_ID/events \
+  -H "Authorization: Bearer ADMIN_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"action":"admin_verifying_cancellation"}'
+```
+
+Supported actions are `admin_verifying_cancellation`, `customer_contacted`,
+`cancellation_approved`, and `cancellation_rejected`. Approval changes the
+booking to `cancelled` and releases its slots. Rejection restores the booking
+to `confirmed` and preserves its slots. No Stripe refund or notification is
+created in v0.6D.
+
+Apply `202606180002_add_cancellation_approved_status.sql` and then
+`202606180003_update_cancellation_review_constraint.sql` after the timeline
+migration before using the administrator approval action.
 
 List all courts as an administrator:
 
@@ -275,10 +313,12 @@ curl -X POST http://localhost:3001/api/bookings/lock \
 3. Repeat the same lock request. It must return HTTP `409`.
 4. After the 10-minute lock expires and cleanup runs, availability must show
    the slots as available and the parent booking must have status `expired`.
-5. For a confirmed booking at least 24 hours away, cancel it and verify the
-   full refund record is created and the deleted slots become available.
-6. Cancel a confirmed booking less than 24 hours away and verify no refund is
-   created while the slots are still released.
+5. For a confirmed booking at least 24 hours away, request cancellation and
+   verify the booking becomes `cancellation_requested`, the request and
+   timeline are created, no refund record is created, and confirmed slot rows
+   remain reserved.
+6. Attempt to cancel a confirmed booking less than 24 hours away and verify
+   HTTP `409`, no refund, no cancellation request, and no slot release.
 7. Replay a processed Stripe event ID and verify HTTP `200` without duplicate
    booking, slot, payment event, or refund changes.
 8. Send a signed `checkout.session.completed` fixture with an unpaid status,
