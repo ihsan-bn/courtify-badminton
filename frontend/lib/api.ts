@@ -208,6 +208,74 @@ export type RefundMethod =
   | "Bank Transfer"
   | "Other";
 
+export interface AdminDashboardSummary {
+  total_bookings: number;
+  bookings_today: number;
+  bookings_this_month: number;
+  revenue_today: string;
+  revenue_this_month: string;
+  upcoming_bookings_count: number;
+  pending_cancellation_requests: number;
+  refunds_in_progress: number;
+  active_courts: number;
+}
+
+export interface DashboardOccupancyBooking {
+  booking_id: string;
+  customer_name: string | null;
+  reservation_start_at: string;
+  reservation_end_at: string;
+}
+
+export interface DashboardCourtOccupancy {
+  court_id: string;
+  court_name: string;
+  current_status: "available" | "occupied" | "upcoming_today";
+  current_booking: DashboardOccupancyBooking | null;
+  next_booking_today: DashboardOccupancyBooking | null;
+}
+
+export interface DashboardOperationsBooking {
+  booking_id: string;
+  customer_name: string | null;
+  court_name: string;
+  reservation_start_at: string;
+  reservation_end_at: string;
+  status: "confirmed" | "cancellation_requested";
+  total_amount_bnd: string;
+}
+
+export interface DashboardPendingCancellation {
+  request_id: string;
+  booking_id: string;
+  customer_name: string | null;
+  court_name: string;
+  reservation_start_at: string;
+  cancellation_status:
+    | "pending_admin_review"
+    | "admin_verifying"
+    | "customer_contacted";
+  requested_at: string;
+}
+
+export interface DashboardRefundInProgress {
+  request_id: string;
+  booking_id: string;
+  customer_name: string | null;
+  refund_method: string | null;
+  refund_reference: string | null;
+  requested_at: string;
+}
+
+export interface AdminDashboardOperations {
+  today_date: string;
+  live_court_occupancy: DashboardCourtOccupancy[];
+  todays_bookings: DashboardOperationsBooking[];
+  upcoming_bookings: DashboardOperationsBooking[];
+  pending_cancellations: DashboardPendingCancellation[];
+  refunds_in_progress: DashboardRefundInProgress[];
+}
+
 export class ApiError extends Error {
   public constructor(
     message: string,

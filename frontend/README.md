@@ -81,6 +81,22 @@ and internal notes, then close the case. Customers see refund date, method,
 and reference but never see internal admin notes. Stripe automated refunds are
 not used.
 
+## Executive KPI Dashboard
+
+Administrator accounts use `/dashboard` as an executive summary. It calls
+`GET /api/admin/dashboard/summary` and displays responsive KPI cards for
+bookings, active paid booking revenue, upcoming reservations, cancellation
+review workload, manual refunds in progress, and active courts. The page keeps
+the cancellation management link and includes non-interactive placeholders
+for future revenue and court analytics pages.
+
+The same page calls `GET /api/admin/dashboard/operations` for live active-court
+occupancy, today's active paid bookings, the next 10 upcoming bookings,
+pending cancellation reviews, and manual refunds in progress. Cancellation
+and refund rows link to their administrator case detail page. Booking rows show
+their database booking reference until a dedicated admin booking-detail route
+is introduced.
+
 ## Stripe Checkout Flow
 
 After a temporary booking lock is created, `/book` calls

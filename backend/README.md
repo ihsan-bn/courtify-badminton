@@ -314,6 +314,40 @@ curl -X POST http://localhost:3001/api/admin/courts \
 The seeded administrator can request an OTP using the phone number in
 `supabase/seed.sql`, then verify it to obtain an administrator token.
 
+## Executive Dashboard Summary
+
+Get the administrator KPI summary:
+
+```bash
+curl http://localhost:3001/api/admin/dashboard/summary \
+  -H "Authorization: Bearer ADMIN_ACCESS_TOKEN"
+```
+
+The endpoint returns booking, revenue, operations, and active-court totals.
+Today and month boundaries use `Asia/Brunei`. Booking-period counts use
+`bookings.created_at`. Revenue includes database-authoritative booking totals
+for `confirmed` and `cancellation_requested` bookings and excludes cancelled,
+expired, and unpaid locked bookings. Upcoming bookings are future confirmed
+or cancellation-requested reservations. Pending cancellations include
+`pending_admin_review`, `admin_verifying`, and `customer_contacted`; refunds in
+progress include only `refund_in_progress`.
+
+Get the live administrator operations dashboard:
+
+```bash
+curl http://localhost:3001/api/admin/dashboard/operations \
+  -H "Authorization: Bearer ADMIN_ACCESS_TOKEN"
+```
+
+The operations endpoint uses `Asia/Brunei` for today's date and schedule
+boundaries. Live occupancy, today's bookings, and the next 10 upcoming
+bookings include active paid states: `confirmed` and
+`cancellation_requested`. Active courts are marked `occupied` when a booking
+contains the current instant, `upcoming_today` when the next active booking is
+later today, and `available` otherwise. Pending cancellations include
+`pending_admin_review`, `admin_verifying`, and `customer_contacted`. Manual
+refund workload includes only `refund_in_progress`.
+
 ## Booking Engine Validation
 
 Use a future date and an active court ID for this checklist:

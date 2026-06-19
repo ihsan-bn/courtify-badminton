@@ -20,6 +20,7 @@ import {
   adminCourtsRouter,
   publicCourtsRouter
 } from "./modules/courts/courts.routes.js";
+import { adminDashboardRouter } from "./modules/dashboard/dashboard.routes.js";
 import { healthRouter } from "./modules/health/health.routes.js";
 import {
   paymentsRouter,
@@ -66,6 +67,7 @@ app.use("/api/bookings", bookingsRouter);
 app.use("/api/payments", paymentsRouter);
 app.use("/api/admin/courts", adminCourtsRouter);
 app.use("/api/admin/bookings", adminBookingsRouter);
+app.use("/api/admin/dashboard", adminDashboardRouter);
 app.use(
   "/api/admin/cancellation-requests",
   adminCancellationRequestsRouter
