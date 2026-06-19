@@ -1,76 +1,350 @@
-# Courtify-Badminton
+# 🏸 Courtify-Badminton
 
-Database foundation for the Courtify-Badminton booking platform in Brunei.
+Courtify-Badminton is a modern badminton court booking platform designed for badminton venue operators in Brunei Darussalam.
 
-## Database structure
+The platform provides customer self-service court reservations, Stripe payment processing, cancellation and refund workflows, administrative operations dashboards, transactional email notifications, and downloadable PDF receipts.
+
+---
+
+## 🚀 Current Version
+
+**v0.8B – PDF Receipts & Documents**
+
+---
+
+## ✨ Features
+
+### Customer Portal
+
+- Phone OTP authentication
+- Customer onboarding
+- Court availability search
+- Consecutive hourly slot booking
+- Real-time booking lock management
+- Stripe Checkout payment integration
+- Booking history
+- Booking details page
+- Cancellation request workflow
+- Refund status tracking
+- PDF receipt downloads
+
+### Booking Engine
+
+- Multi-court management
+- Consecutive slot reservations
+- Automatic lock expiration
+- Reservation conflict prevention
+- Booking status lifecycle management
+
+### Payments
+
+- Stripe Checkout integration
+- Webhook-based booking confirmation
+- Payment event tracking
+- Expired payment handling
+- Failed payment handling
+- Payment audit history
+
+### Cancellation Management
+
+- Customer cancellation requests
+- Two-step cancellation confirmation
+- Typed confirmation ("CANCEL BOOKING")
+- 24-hour cancellation policy enforcement
+- Administrative review workflow
+- Approval and rejection handling
+- Full cancellation timeline tracking
+
+### Refund Management
+
+- Manual refund workflow
+- Refund reference tracking
+- Refund method recording
+- Refund progress tracking
+- Refund completion workflow
+- Case closure management
+
+### Administrative Portal
+
+- Operations dashboard
+- Occupancy overview
+- Active booking monitoring
+- Upcoming booking visibility
+- Cancellation queue
+- Refund queue
+- Cancellation case management
+- Customer timeline management
+
+### Notifications
+
+- Booking confirmation emails
+- Cancellation request emails
+- Cancellation approval emails
+- Refund completion emails
+- Case closure emails
+- Notification delivery history
+
+### PDF Documents
+
+- Booking Receipt
+- Cancellation Receipt
+- Refund Receipt
+- Administrative Case Summary
+
+---
+
+## 🏗️ Technology Stack
+
+### Frontend
+
+- Next.js 15
+- React
+- TypeScript
+
+### Backend
+
+- Node.js
+- Express 5
+- TypeScript
+
+### Database
+
+- PostgreSQL
+- Supabase
+
+### Payments
+
+- Stripe Checkout
+- Stripe Webhooks
+
+### Authentication
+
+- OTP-based login
+- JWT authentication
+
+### Notifications
+
+- Pluggable email provider architecture
+
+---
+
+## 📁 Project Structure
 
 ```text
-supabase/
-|-- migrations/
-|   |-- 202606120001_create_courtify_database.sql
-|   |-- 202606150001_allow_booking_relock.sql
-|   |-- 202606150002_create_refund_records.sql
-|   |-- 202606180001_create_cancellation_request_events.sql
-|   |-- 202606180002_add_cancellation_approved_status.sql
-|   |-- 202606180003_update_cancellation_review_constraint.sql
-|   |-- 202606180004_add_manual_refund_statuses.sql
-|   |-- 202606180005_add_manual_refund_fields.sql
-|   `-- 202606190001_add_email_delivery_metadata.sql
-`-- seed.sql
+courtify-badminton/
+│
+├── backend/
+│   ├── src/
+│   ├── package.json
+│   └── tsconfig.json
+│
+├── frontend/
+│   ├── app/
+│   ├── components/
+│   ├── lib/
+│   └── package.json
+│
+├── supabase/
+│   ├── migrations/
+│   └── seed.sql
+│
+├── README.md
+├── FEstart.bat
+└── BEstart.bat
 ```
 
-The migration creates the PostgreSQL schema, enum types, constraints, indexes,
-updated timestamp triggers, row-level security defaults, and the deterministic
-`get_slot_price_bnd` pricing function. The seed creates four active courts and
-one fully onboarded administrator.
+---
 
-All reservation timestamps use `timestamptz`. Operating-hour checks interpret
-them in `Asia/Brunei` and permit hourly starts from 08:00 through 21:00, with
-the facility closing at 22:00.
+## ⚙️ Local Development
 
-## Run with the Supabase CLI
+### Backend
 
-Install the Supabase CLI and authenticate:
-
-```powershell
-supabase init
-supabase login
-supabase link
-supabase db push --include-seed
+```bash
+cd backend
+npm install
+npm run dev
 ```
 
-For a local Supabase environment, reset the database to apply all migrations
-and the seed:
+Backend runs on:
 
-```powershell
-supabase start
-supabase db reset
+```text
+http://localhost:4000
 ```
 
-## Run in the Supabase dashboard
+---
 
-1. Open the project's SQL Editor.
-2. Run each file in `supabase/migrations/` in filename order.
-3. Run `supabase/seed.sql`.
+### Frontend
 
-Row-level security is enabled on every application table without public client
-policies. This is deny-by-default until authentication and authorization
-policies are added with the backend integration.
+```bash
+cd frontend
+npm install
+npm run dev
+```
 
-The strict `booking_slots(court_id, slot_date, start_hour)` unique constraint
-prevents double booking. A future cancellation or expired-lock transaction
-must delete the affected slot rows while preserving the parent booking as the
-audit record, which immediately makes those hours available again.
+Frontend runs on:
 
-## Backend
+```text
+http://localhost:3000
+```
 
-The Phase 2 Express and TypeScript API is located in `backend/`. See
-`backend/README.md` for environment setup, commands, security requirements,
-and request examples.
+---
 
-## Frontend
+### Stripe Webhook Listener
 
-The Phase 5A customer-facing Next.js app is located in `frontend/`. It includes
-the landing page, phone OTP login, first-time onboarding, and customer
-dashboard foundation. See `frontend/README.md` for setup and validation
-commands.
+Required for local payment testing.
+
+```bash
+stripe listen --forward-to localhost:4000/api/payments/webhook
+```
+
+---
+
+## 🔥 Startup Checklist
+
+Before testing payments:
+
+### Terminal 1
+
+```bash
+cd backend
+npm run dev
+```
+
+### Terminal 2
+
+```bash
+cd frontend
+npm run dev
+```
+
+### Terminal 3
+
+```bash
+stripe listen --forward-to localhost:4000/api/payments/webhook
+```
+
+All three services should be running.
+
+---
+
+## 📊 Booking Lifecycle
+
+```text
+Customer Login
+      │
+      ▼
+Select Court & Slots
+      │
+      ▼
+Create Booking Lock
+      │
+      ▼
+Stripe Checkout
+      │
+      ▼
+Payment Success
+      │
+      ▼
+Booking Confirmed
+      │
+      ▼
+Customer Uses Court
+```
+
+---
+
+## 📋 Cancellation Lifecycle
+
+```text
+Customer Requests Cancellation
+             │
+             ▼
+Pending Admin Review
+             │
+             ▼
+Admin Verification
+             │
+             ▼
+Customer Contacted
+             │
+             ▼
+Approved / Rejected
+             │
+             ▼
+Refund Processing
+             │
+             ▼
+Case Closed
+```
+
+---
+
+## 📄 Available Documents
+
+### Customer
+
+- Booking Receipt
+- Cancellation Receipt
+- Refund Receipt
+
+### Administrator
+
+- Cancellation Case Summary
+
+---
+
+## 🔒 Security Features
+
+- JWT authentication
+- Role-based authorization
+- Ownership validation
+- Customer data isolation
+- Stripe webhook verification
+- Transaction-safe booking workflows
+- Idempotent payment handling
+- Secure PDF generation
+- Audit-friendly status tracking
+
+---
+
+## 🗺️ Roadmap
+
+### v0.9A
+
+- Business reporting
+- CSV exports
+- Excel exports
+- Revenue reporting
+
+### v0.9B
+
+- Administrative audit logs
+- User activity tracking
+
+### v0.9C
+
+- Multi-admin management
+- Role administration
+
+### v1.0
+
+- Production deployment
+- Production email provider
+- Monitoring and observability
+- Operational hardening
+
+---
+
+## 👨‍💻 Author
+
+Developed by **Muhammad Ihsan Hazwan Hj Bungsu**
+
+Senior Executive, ISS Cybersecurity  
+Imagine Sdn Bhd  
+Brunei Darussalam
+
+---
+
+## 📜 License
+
+Private project. All rights reserved.
