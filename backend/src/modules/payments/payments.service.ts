@@ -12,6 +12,7 @@ import {
 } from "../../utils/errors.js";
 import { bookingsRepository } from "../bookings/bookings.repository.js";
 import { emailService } from "../email/email.service.js";
+import { auditService } from "../audit/audit.service.js";
 import { paymentsRepository } from "./payments.repository.js";
 import type {
   CreateCheckoutSessionInput,
@@ -429,6 +430,9 @@ export const paymentsService = {
       return;
     }
 
+    const webhookOutcome: { expiredBookingId: string | null } = {
+      expiredBookingId: null
+    };
     const confirmedBookingId: string | null = await withTransaction(
       async (client) => {
       const claimed = await paymentsRepository.claimPaymentEvent(
@@ -536,6 +540,7 @@ export const paymentsService = {
             client,
             booking.id
           );
+          webhookOutcome.expiredBookingId = booking.id;
         }
         return null;
       }
@@ -586,6 +591,7 @@ export const paymentsService = {
             client,
             booking.id
           );
+          webhookOutcome.expiredBookingId = booking.id;
         }
         return null;
       }
@@ -659,7 +665,25 @@ export const paymentsService = {
     );
 
     if (confirmedBookingId) {
+      await auditService.record({
+        actor: { userId: null, role: "system", name: "Stripe webhook" },
+        action: "booking_confirmed_by_webhook",
+        entityType: "booking",
+        entityId: confirmedBookingId,
+        summary: "Stripe webhook confirmed the paid booking.",
+        metadata: { stripe_event_id: event.id, event_type: event.type }
+      });
       await emailService.sendBookingConfirmation(confirmedBookingId);
+    }
+    if (webhookOutcome.expiredBookingId) {
+      await auditService.record({
+        actor: { userId: null, role: "system", name: "Stripe webhook" },
+        action: "booking_expired",
+        entityType: "booking",
+        entityId: webhookOutcome.expiredBookingId,
+        summary: "Payment processing expired a booking lock.",
+        metadata: { stripe_event_id: event.id, event_type: event.type }
+      });
     }
   }
 };

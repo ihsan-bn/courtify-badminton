@@ -1,0 +1,28 @@
+Start Courtify with 3 terminals.
+=========================================================================
+Terminal 1 — Backend
+cd "C:\Users\ihsan.b.IMAGINE\Documents\GitHub\badminton-court\backend"
+npm run dev
+
+Expected: API running on port 4000.
+=========================================================================
+Terminal 2 — Frontend
+cd "C:\Users\ihsan.b.IMAGINE\Documents\GitHub\badminton-court\frontend"
+npm run dev
+=========================================================================
+Open:
+
+http://localhost:3000
+=========================================================================
+Terminal 3 — Stripe Listener
+& "C:\Users\ihsan.b.IMAGINE\AppData\Local\Microsoft\WinGet\Packages\Stripe.StripeCli_Microsoft.Winget.Source_8wekyb3d8bbwe\stripe.exe" listen --forward-to localhost:4000/api/payments/webhook
+
+Keep this window open.
+=========================================================================
+Quick health check:
+
+curl.exe http://localhost:4000/health
+curl.exe http://localhost:4000/health/db
+
+Then login and continue testing.
+=========================================================================

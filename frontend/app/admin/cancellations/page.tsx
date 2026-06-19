@@ -77,7 +77,7 @@ export default function AdminCancellationsPage() {
             manual refund completion and closure.
           </p>
           <div className="actions">
-            <Link className="button-secondary" href="/dashboard">
+            <Link className="button-secondary" href="/admin/dashboard">
               Dashboard
             </Link>
           </div>

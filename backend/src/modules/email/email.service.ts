@@ -7,11 +7,16 @@ import type {
   EmailTemplate
 } from "./email.types.js";
 import { LocalEmailProvider } from "./providers/localEmail.provider.js";
+import { auditService } from "../audit/audit.service.js";
 
 const providers: Record<typeof env.emailProvider, EmailProvider> = {
   local: new LocalEmailProvider()
 };
 const provider = providers[env.emailProvider];
+
+function getFrontendOrigin(): string {
+  return env.corsAllowedOrigins[0] ?? "http://localhost:3000";
+}
 
 function safeErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Unknown email provider error";
@@ -66,6 +71,18 @@ async function dispatch(
       notificationEventId,
       result.providerMessageId
     );
+    await auditService.record({
+      actor: { userId: null, role: "system", name: "Email service" },
+      action: "notification_sent",
+      entityType: "booking",
+      entityId: bookingId,
+      summary: "Transactional email notification was sent.",
+      metadata: {
+        notification_event_id: notificationEventId,
+        email_type: eventType,
+        provider_message_id: result.providerMessageId
+      }
+    });
   } catch (error) {
     console.error(
       JSON.stringify({
@@ -83,6 +100,18 @@ async function dispatch(
           notificationEventId,
           safeErrorMessage(error)
         );
+        await auditService.record({
+          actor: { userId: null, role: "system", name: "Email service" },
+          action: "notification_failed",
+          entityType: "booking",
+          entityId: bookingId,
+          summary: "Transactional email notification failed.",
+          metadata: {
+            notification_event_id: notificationEventId,
+            email_type: eventType,
+            failure: "email_delivery_failed"
+          }
+        });
       } catch (historyError) {
         console.error(
           JSON.stringify({
@@ -99,6 +128,73 @@ async function dispatch(
 }
 
 export const emailService = {
+  async sendLoginOtp({
+    to,
+    otp,
+    name
+  }: {
+    to: string;
+    otp: string;
+    name: string | null;
+  }): Promise<void> {
+    const greeting = name ? `Hi ${name},` : "Hi,";
+    await provider.send({
+      to: to.toLowerCase(),
+      from: env.emailFrom,
+      subject: "Your Courtify-Badminton login OTP",
+      html: `<p>${greeting}</p><p>Your Courtify-Badminton OTP is <strong>${otp}</strong>. It expires in 5 minutes.</p>`,
+      text: `${greeting}\n\nYour Courtify-Badminton OTP is ${otp}. It expires in 5 minutes.`
+    });
+  },
+
+  async sendPasswordResetLink({
+    to,
+    token,
+    name
+  }: {
+    to: string;
+    token: string;
+    name: string | null;
+  }): Promise<void> {
+    const resetUrl = `${getFrontendOrigin()}/reset-password?token=${encodeURIComponent(token)}`;
+    const greeting = name ? `Hi ${name},` : "Hi,";
+    await provider.send({
+      to: to.toLowerCase(),
+      from: env.emailFrom,
+      subject: "Reset your Courtify-Badminton password",
+      html: `<p>${greeting}</p><p>Use this secure link to reset your password. It expires in 30 minutes:</p><p><a href="${resetUrl}">${resetUrl}</a></p>`,
+      text: `${greeting}\n\nUse this secure link to reset your password. It expires in 30 minutes:\n${resetUrl}`
+    });
+
+    if (!env.isProduction) {
+      console.info(
+        JSON.stringify({
+          level: "info",
+          message: "Local password reset link generated",
+          to: to.toLowerCase(),
+          reset_url: resetUrl
+        })
+      );
+    }
+  },
+
+  async sendPasswordChangedNotification({
+    to,
+    name
+  }: {
+    to: string;
+    name: string | null;
+  }): Promise<void> {
+    const greeting = name ? `Hi ${name},` : "Hi,";
+    await provider.send({
+      to: to.toLowerCase(),
+      from: env.emailFrom,
+      subject: "Your Courtify-Badminton password was changed",
+      html: `<p>${greeting}</p><p>Your Courtify-Badminton password was changed. If this was not you, contact the court administrator immediately.</p>`,
+      text: `${greeting}\n\nYour Courtify-Badminton password was changed. If this was not you, contact the court administrator immediately.`
+    });
+  },
+
   async sendBookingConfirmation(bookingId: string): Promise<void> {
     await dispatch(bookingId, "booking_confirmation", (context) =>
       emailTemplates.bookingConfirmation({

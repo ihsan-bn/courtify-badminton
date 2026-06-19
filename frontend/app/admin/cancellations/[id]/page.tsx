@@ -13,6 +13,7 @@ import { AdminGuard } from "@/components/AdminGuard";
 import {
   apiFetch,
   ApiError,
+  downloadApiFile,
   type AdminCancellationAction,
   type AdminCancellationDetail,
   type RefundMethod
@@ -95,6 +96,7 @@ export default function AdminCancellationDetailsPage() {
   const [refundMethod, setRefundMethod] = useState<RefundMethod | "">("");
   const [refundReference, setRefundReference] = useState("");
   const [refundNotes, setRefundNotes] = useState("");
+  const [downloadingSummary, setDownloadingSummary] = useState(false);
 
   const loadRequest = useCallback(async () => {
     if (!requestId) {
@@ -175,6 +177,29 @@ export default function AdminCancellationDetailsPage() {
     });
   }
 
+  async function downloadCaseSummary() {
+    if (!request || downloadingSummary) {
+      return;
+    }
+
+    setDownloadingSummary(true);
+    setError(null);
+    try {
+      await downloadApiFile(
+        `/api/admin/cancellations/${request.request_id}/case-summary`,
+        `courtify-cancellation-case-${request.request_id}.pdf`
+      );
+    } catch (caught) {
+      setError(
+        caught instanceof ApiError
+          ? caught.message
+          : "Unable to download the case summary."
+      );
+    } finally {
+      setDownloadingSummary(false);
+    }
+  }
+
   const reviewInProgress =
     request?.status === "pending_admin_review" ||
     request?.status === "admin_verifying" ||
@@ -197,6 +222,18 @@ export default function AdminCancellationDetailsPage() {
             <Link className="button-secondary" href="/dashboard">
               Dashboard
             </Link>
+            {request ? (
+              <button
+                className="button"
+                type="button"
+                disabled={downloadingSummary}
+                onClick={() => void downloadCaseSummary()}
+              >
+                {downloadingSummary
+                  ? "Preparing summary..."
+                  : "Download Case Summary"}
+              </button>
+            ) : null}
           </div>
         </div>
 

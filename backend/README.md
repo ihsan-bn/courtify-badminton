@@ -58,10 +58,10 @@ curl http://localhost:3001/health
 curl http://localhost:3001/health/db
 ```
 
-Request an OTP:
+First-time customer registration starts with a phone OTP:
 
 ```bash
-curl -X POST http://localhost:3001/api/auth/request-otp \
+curl -X POST http://localhost:3001/api/auth/registration/request-otp \
   -H "Content-Type: application/json" \
   -d '{"phone_number":"+6738123456"}'
 ```
@@ -69,13 +69,85 @@ curl -X POST http://localhost:3001/api/auth/request-otp \
 Development and test environments include the OTP in this response. Production
 never returns it.
 
-Verify the OTP:
+Complete registration by verifying the phone OTP and setting name, email, and
+password:
 
 ```bash
-curl -X POST http://localhost:3001/api/auth/verify-otp \
+curl -X POST http://localhost:3001/api/auth/registration/complete \
   -H "Content-Type: application/json" \
-  -d '{"phone_number":"+6738123456","otp":"123456"}'
+  -d '{"phone_number":"+6738123456","otp":"123456","name":"Customer Name","email":"customer@example.com","password":"Password123!","confirm_password":"Password123!"}'
 ```
+
+Returning customers and administrators login with email, password, and a
+second OTP step. The caller chooses `email` or `sms` for OTP delivery:
+
+```bash
+curl -X POST http://localhost:3001/api/auth/request-email-password-otp \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin@courtify-badminton.com","password":"CourtifyAdmin123!","otp_channel":"email"}'
+```
+
+Wrong or unavailable credentials return the same safe
+`Invalid email or password.` response. The endpoint is rate limited. In
+development and test, the successful response includes or logs the generated
+OTP/reset link; in production it never returns OTPs in API responses.
+
+Verify the email-login OTP:
+
+```bash
+curl -X POST http://localhost:3001/api/auth/verify-email-password-otp \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin@courtify-badminton.com","otp":"123456"}'
+```
+
+Both verification routes return the same JWT, user profile, and
+`onboarding_required` response shape. Apply
+`202606190003_add_user_password_credentials.sql` and
+`202606260001_create_password_reset_tokens.sql` before using the redesigned
+auth flows. Passwords are stored only as bcrypt hashes. The backend uses
+`bcryptjs` so local Windows development does not require native compiler
+tooling; no plaintext password is stored or returned.
+
+Forgot password always returns a generic success message:
+
+```bash
+curl -X POST http://localhost:3001/api/auth/forgot-password \
+  -H "Content-Type: application/json" \
+  -d '{"email":"customer@example.com"}'
+```
+
+Reset links expire after 30 minutes. The raw token is sent only in the reset
+link; the database stores a SHA-256 token hash. Local development logs the
+reset URL through the local email provider.
+
+Reset password:
+
+```bash
+curl -X POST http://localhost:3001/api/auth/reset-password \
+  -H "Content-Type: application/json" \
+  -d '{"token":"RESET_TOKEN","password":"NewPassword123!","confirm_password":"NewPassword123!"}'
+```
+
+Update the authenticated profile:
+
+```bash
+curl -X PATCH http://localhost:3001/api/me/profile \
+  -H "Authorization: Bearer ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Customer Name","email":"customer@example.com","phone_number":"+6738123456"}'
+```
+
+Change password:
+
+```bash
+curl -X POST http://localhost:3001/api/me/change-password \
+  -H "Authorization: Bearer ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"current_password":"Password123!","new_password":"NewPassword123!","confirm_new_password":"NewPassword123!"}'
+```
+
+Changing password keeps the current session active and sends a password-changed
+notification when the account has an email address.
 
 Use the returned access token for protected routes:
 
@@ -318,8 +390,17 @@ curl -X POST http://localhost:3001/api/admin/courts \
   -d '{"name":"Court 5","location":"Main Hall","active":true}'
 ```
 
-The seeded administrator can request an OTP using the phone number in
-`supabase/seed.sql`, then verify it to obtain an administrator token.
+The local seed administrator supports both login paths:
+
+```text
+Email: admin@courtify-badminton.com
+Password: CourtifyAdmin123!
+Phone: +6732220000
+```
+
+These credentials are for local development only. The seed stores a bcrypt
+hash, not the plaintext password. Do not reuse this password or run the
+development seed in production.
 
 ## Executive Dashboard Summary
 
@@ -394,6 +475,86 @@ case-closure operations.
 The administrator cancellation detail response exposes only email type,
 delivery status, attempt timestamp, and sent timestamp. Email bodies and
 provider errors are not included in the delivery-history response.
+
+## PDF Receipts And Documents
+
+PDF documents are generated on demand from server-authoritative booking,
+cancellation, timeline, and manual refund data. No document files are stored.
+The implementation uses a lightweight internal PDF generator with PDF
+built-in Helvetica fonts, so no additional runtime PDF dependency is needed.
+
+Customer downloads require authentication and enforce booking ownership:
+
+```bash
+curl http://localhost:3001/api/bookings/BOOKING_ID/receipt \
+  -H "Authorization: Bearer ACCESS_TOKEN" \
+  --output booking-receipt.pdf
+
+curl http://localhost:3001/api/bookings/BOOKING_ID/cancellation-receipt \
+  -H "Authorization: Bearer ACCESS_TOKEN" \
+  --output cancellation-receipt.pdf
+
+curl http://localhost:3001/api/bookings/BOOKING_ID/refund-receipt \
+  -H "Authorization: Bearer ACCESS_TOKEN" \
+  --output refund-receipt.pdf
+```
+
+Administrators can download a complete cancellation case summary:
+
+```bash
+curl http://localhost:3001/api/admin/cancellations/REQUEST_ID/case-summary \
+  -H "Authorization: Bearer ADMIN_ACCESS_TOKEN" \
+  --output cancellation-case-summary.pdf
+```
+
+Cancellation and refund receipts return a safe `404` response until the
+required cancellation or completed refund data exists. Locked and expired
+bookings do not produce paid booking receipts.
+
+## Business Reports And CSV Exports
+
+Administrator-only CSV reports are available under `/api/admin/reports`.
+Reports accept an optional `from=YYYY-MM-DD&to=YYYY-MM-DD` range. Omitting
+both values defaults to the current calendar month in `Asia/Brunei`; supplying
+only one date, an invalid date, or a range longer than 366 inclusive days is
+rejected.
+
+```bash
+curl "http://localhost:3001/api/admin/reports/revenue.csv?from=2026-06-01&to=2026-06-30" \
+  -H "Authorization: Bearer ADMIN_ACCESS_TOKEN" \
+  --output courtify-revenue.csv
+```
+
+Available reports are `revenue.csv`, `bookings.csv`, `cancellations.csv`,
+`refunds.csv`, and `court-utilization.csv`. Revenue is filtered by booking
+creation date, bookings and court utilization by reservation date,
+cancellations by request date, and refunds by refund-case request date.
+Exports use parameterized database queries, UTF-8 CSV, correct quoting, and
+formula-injection protection. Stripe payment references may be included, but
+Stripe credentials and internal refund notes are never exported.
+
+## Audit Logs
+
+Apply `202606190002_create_audit_logs.sql` before enabling audit history.
+The application records selected customer, administrator, and system actions
+without changing the outcome of the primary workflow. Audit writes are
+failure-isolated: an unavailable audit table or audit insert failure is logged
+server-side and never rolls back booking, payment, cancellation, refund,
+notification, receipt, report, or dashboard behavior.
+
+Administrators can query the paginated audit history:
+
+```bash
+curl "http://localhost:3001/api/admin/audit-logs?action=refund_completed&page=1&page_size=25" \
+  -H "Authorization: Bearer ADMIN_ACCESS_TOKEN"
+```
+
+Supported filters are `action`, `actor_user_id`, `entity_type`, `entity_id`,
+`from`, `to`, `page`, and `page_size`. Page size is limited to 100. Date
+filters use `Asia/Brunei`. Metadata is recursively sanitized before storage;
+authorization values, tokens, OTPs, passwords, secrets, cookies, and similar
+sensitive fields are replaced with `[REDACTED]`. The API is administrator-only
+and all filters use parameterized SQL.
 
 ## Booking Engine Validation
 

@@ -30,3 +30,31 @@ export const verifyOtpRateLimiter = rateLimit({
   limit: 20,
   skipSuccessfulRequests: false
 });
+
+export const requestEmailPasswordOtpRateLimiter = rateLimit({
+  ...commonOptions,
+  windowMs: 15 * 60 * 1000,
+  limit: 5,
+  skipSuccessfulRequests: false
+});
+
+export const verifyEmailPasswordOtpRateLimiter = rateLimit({
+  ...commonOptions,
+  windowMs: 15 * 60 * 1000,
+  limit: 20,
+  skipSuccessfulRequests: false
+});
+
+export const forgotPasswordRateLimiter = rateLimit({
+  ...commonOptions,
+  windowMs: 15 * 60 * 1000,
+  limit: 5,
+  skipSuccessfulRequests: false
+});
+
+export const resetPasswordRateLimiter = rateLimit({
+  ...commonOptions,
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  skipSuccessfulRequests: false
+});

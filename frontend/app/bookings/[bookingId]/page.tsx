@@ -14,6 +14,7 @@ import { AuthGuard } from "@/components/AuthGuard";
 import {
   apiFetch,
   ApiError,
+  downloadApiFile,
   type BookingStatus,
   type CustomerBooking
 } from "@/lib/api";
@@ -23,6 +24,7 @@ const CANCELLATION_WINDOW_MS = 24 * 60 * 60 * 1000;
 const CANCELLATION_CONFIRMATION_PHRASE = "CANCEL BOOKING";
 
 type CancellationDialogStep = "policy" | "final" | null;
+type DownloadType = "booking" | "cancellation" | "refund";
 
 const TIMELINE_LABELS: Record<string, string> = {
   customer_requested_cancellation: "Cancellation requested by customer",
@@ -149,6 +151,8 @@ export default function BookingDetailsPage() {
     useState<CancellationDialogStep>(null);
   const [confirmationPhrase, setConfirmationPhrase] = useState("");
   const [submittingCancellation, setSubmittingCancellation] = useState(false);
+  const [downloading, setDownloading] = useState<DownloadType | null>(null);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(() => Date.now());
 
   const loadBooking = useCallback(async () => {
@@ -270,6 +274,37 @@ export default function BookingDetailsPage() {
     void handleCancelBooking();
   }
 
+  async function handleDownload(type: DownloadType) {
+    if (!booking || downloading) {
+      return;
+    }
+
+    const paths: Record<DownloadType, string> = {
+      booking: `/api/bookings/${booking.booking_id}/receipt`,
+      cancellation: `/api/bookings/${booking.booking_id}/cancellation-receipt`,
+      refund: `/api/bookings/${booking.booking_id}/refund-receipt`
+    };
+    const filenames: Record<DownloadType, string> = {
+      booking: `courtify-booking-receipt-${booking.booking_id}.pdf`,
+      cancellation: `courtify-cancellation-receipt-${booking.booking_id}.pdf`,
+      refund: `courtify-refund-receipt-${booking.booking_id}.pdf`
+    };
+
+    setDownloading(type);
+    setDownloadError(null);
+    try {
+      await downloadApiFile(paths[type], filenames[type]);
+    } catch (caught) {
+      setDownloadError(
+        caught instanceof ApiError
+          ? caught.message
+          : "Unable to download this document."
+      );
+    } finally {
+      setDownloading(null);
+    }
+  }
+
   return (
     <AuthGuard>
       <section className="page">
@@ -305,6 +340,11 @@ export default function BookingDetailsPage() {
         {cancelError && dialogStep === null ? (
           <p className="alert" role="alert">
             {cancelError}
+          </p>
+        ) : null}
+        {downloadError ? (
+          <p className="alert" role="alert">
+            {downloadError}
           </p>
         ) : null}
 
@@ -434,6 +474,57 @@ export default function BookingDetailsPage() {
                   </ul>
                 )}
               </section>
+
+              {booking.status !== "locked" && booking.status !== "expired" ? (
+                <section
+                  className="document-actions"
+                  aria-labelledby="booking-documents-title"
+                >
+                  <div>
+                    <h3 id="booking-documents-title">Documents</h3>
+                    <p className="hint">
+                      Download server-generated Courtify PDF records for this
+                      booking.
+                    </p>
+                  </div>
+                  <div className="actions">
+                    <button
+                      className="button-secondary"
+                      type="button"
+                      disabled={downloading !== null}
+                      onClick={() => void handleDownload("booking")}
+                    >
+                      {downloading === "booking"
+                        ? "Preparing receipt..."
+                        : "Download Booking Receipt"}
+                    </button>
+                    {booking.cancellation_request ? (
+                      <button
+                        className="button-secondary"
+                        type="button"
+                        disabled={downloading !== null}
+                        onClick={() => void handleDownload("cancellation")}
+                      >
+                        {downloading === "cancellation"
+                          ? "Preparing receipt..."
+                          : "Download Cancellation Receipt"}
+                      </button>
+                    ) : null}
+                    {booking.cancellation_request?.refunded_at ? (
+                      <button
+                        className="button-secondary"
+                        type="button"
+                        disabled={downloading !== null}
+                        onClick={() => void handleDownload("refund")}
+                      >
+                        {downloading === "refund"
+                          ? "Preparing receipt..."
+                          : "Download Refund Receipt"}
+                      </button>
+                    ) : null}
+                  </div>
+                </section>
+              ) : null}
 
               <section className="policy-panel" aria-labelledby="cancellation">
                 <div>

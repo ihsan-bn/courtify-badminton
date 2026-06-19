@@ -1,12 +1,23 @@
 import type { RequestHandler } from "express";
 
 import { dashboardService } from "./dashboard.service.js";
+import { auditService } from "../audit/audit.service.js";
 
 export const getDashboardSummary: RequestHandler = async (
-  _request,
+  request,
   response
 ) => {
   const summary = await dashboardService.getSummary();
+  await auditService.record({
+    actor: {
+      userId: request.authenticatedUser?.id ?? null,
+      role: "admin"
+    },
+    action: "admin_dashboard_viewed",
+    entityType: "admin_dashboard",
+    summary: "Administrator viewed the executive dashboard.",
+    request
+  });
   response.status(200).json(summary);
 };
 

@@ -38,7 +38,10 @@ insert into public.users (
   name,
   email,
   role,
-  onboarding_completed
+  onboarding_completed,
+  password_hash,
+  password_set_at,
+  password_updated_at
 )
 values (
   '20000000-0000-4000-8000-000000000001',
@@ -46,7 +49,10 @@ values (
   'Courtify Administrator',
   'admin@courtify-badminton.com',
   'admin',
-  true
+  true,
+  '$2b$12$TEeBRv.4g9ozojqm090JyO0kzKaBQdFh5s/GCNeEhDpCNck.mV.HK',
+  now(),
+  now()
 )
 on conflict (id) do update
 set
@@ -54,6 +60,9 @@ set
   name = excluded.name,
   email = excluded.email,
   role = excluded.role,
-  onboarding_completed = excluded.onboarding_completed;
+  onboarding_completed = excluded.onboarding_completed,
+  password_hash = excluded.password_hash,
+  password_set_at = coalesce(public.users.password_set_at, excluded.password_set_at),
+  password_updated_at = excluded.password_updated_at;
 
 commit;

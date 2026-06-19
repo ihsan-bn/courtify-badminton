@@ -32,6 +32,8 @@ export interface RequestOtpResponse {
   otp?: string;
 }
 
+export type RequestEmailPasswordOtpResponse = RequestOtpResponse;
+
 export interface VerifyOtpResponse {
   access_token: string;
   token_type: "Bearer";
@@ -344,6 +346,28 @@ export interface AdminDashboardAnalytics {
   };
 }
 
+export interface AuditLog {
+  id: string;
+  actor_user_id: string | null;
+  actor_role: "customer" | "admin" | "system";
+  actor_name: string | null;
+  action: string;
+  entity_type: string;
+  entity_id: string | null;
+  summary: string;
+  metadata: Record<string, unknown>;
+  ip_address: string | null;
+  user_agent: string | null;
+  created_at: string;
+}
+
+export interface AuditLogsResponse {
+  logs: AuditLog[];
+  page: number;
+  page_size: number;
+  total: number;
+}
+
 export class ApiError extends Error {
   public constructor(
     message: string,
@@ -427,4 +451,58 @@ export async function apiFetch<T>(
   }
 
   return data as T;
+}
+
+function getDownloadFilename(
+  response: Response,
+  fallbackFilename: string
+): string {
+  const disposition = response.headers.get("content-disposition");
+  const match = disposition?.match(/filename="([^"]+)"/i);
+  return match?.[1] ?? fallbackFilename;
+}
+
+export async function downloadApiFile(
+  path: string,
+  fallbackFilename: string,
+  accept = "application/pdf"
+): Promise<void> {
+  const token = getAccessToken();
+  if (!token) {
+    throw new ApiError("Please login to continue.", 401, "UNAUTHORIZED");
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(`${getApiBaseUrl()}${path}`, {
+      method: "GET",
+      headers: {
+        Accept: accept,
+        Authorization: `Bearer ${token}`
+      }
+    });
+  } catch (error) {
+    logDevError("Courtify document download failed", error);
+    throw new ApiError("Courtify-Badminton API is unavailable.");
+  }
+
+  if (!response.ok) {
+    const data = await parseJsonResponse(response);
+    const body = data as ApiErrorBody;
+    throw new ApiError(
+      body.error?.message ?? "Unable to download this document.",
+      response.status,
+      body.error?.code
+    );
+  }
+
+  const blob = await response.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = objectUrl;
+  link.download = getDownloadFilename(response, fallbackFilename);
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(objectUrl);
 }

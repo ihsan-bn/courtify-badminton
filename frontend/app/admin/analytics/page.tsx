@@ -117,7 +117,7 @@ export default function AdminAnalyticsPage() {
             refund trends from Courtify-Badminton records.
           </p>
           <div className="actions">
-            <Link className="button-secondary" href="/dashboard">
+            <Link className="button-secondary" href="/admin/dashboard">
               Back to Dashboard
             </Link>
             <Link className="button-secondary" href="/admin/cancellations">

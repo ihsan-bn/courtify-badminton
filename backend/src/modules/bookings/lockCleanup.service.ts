@@ -1,18 +1,23 @@
 import { withTransaction } from "../../config/database.js";
 import { bookingsRepository } from "./bookings.repository.js";
+import { auditService } from "../audit/audit.service.js";
 
-export async function cleanupExpiredBookingLocks(): Promise<number> {
+export async function cleanupExpiredBookingLocks(): Promise<string[]> {
   return withTransaction(async (client) => {
     const bookingIds = await bookingsRepository.findExpiredLockIds(client);
     if (bookingIds.length === 0) {
-      return 0;
+      return [];
     }
 
     await bookingsRepository.deleteSlotsForExpiredBookings(
       client,
       bookingIds
     );
-    return bookingsRepository.markBookingsExpired(client, bookingIds);
+    const expiredCount = await bookingsRepository.markBookingsExpired(
+      client,
+      bookingIds
+    );
+    return expiredCount === bookingIds.length ? bookingIds : [];
   });
 }
 
@@ -28,13 +33,28 @@ export function startExpiredLockCleanupScheduler(
 
     cleanupRunning = true;
     try {
-      const expiredBookings = await cleanupExpiredBookingLocks();
-      if (expiredBookings > 0) {
+      const expiredBookingIds = await cleanupExpiredBookingLocks();
+      if (expiredBookingIds.length > 0) {
+        await Promise.all(
+          expiredBookingIds.map((bookingId) =>
+            auditService.record({
+              actor: {
+                userId: null,
+                role: "system",
+                name: "Lock cleanup scheduler"
+              },
+              action: "booking_expired",
+              entityType: "booking",
+              entityId: bookingId,
+              summary: "Expired booking lock was cleaned and released."
+            })
+          )
+        );
         console.info(
           JSON.stringify({
             level: "info",
             message: "Expired booking locks cleaned",
-            expiredBookings
+            expiredBookings: expiredBookingIds.length
           })
         );
       }
