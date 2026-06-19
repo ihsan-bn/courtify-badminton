@@ -17,3 +17,11 @@ export const getDashboardOperations: RequestHandler = async (
   const operations = await dashboardService.getOperations();
   response.status(200).json(operations);
 };
+
+export const getDashboardAnalytics: RequestHandler = async (
+  _request,
+  response
+) => {
+  const analytics = await dashboardService.getAnalytics();
+  response.status(200).json(analytics);
+};

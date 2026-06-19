@@ -553,9 +553,14 @@ export default function DashboardPage() {
                 </Link>
               </div>
             </article>
-            <article className="card placeholder-card">
+            <article className="card">
               <h3>Revenue Analytics</h3>
-              <p>Detailed revenue analysis will be available in a future phase.</p>
+              <p>Review revenue, booking demand, courts, and customer trends.</p>
+              <div className="actions">
+                <Link className="button-secondary" href="/admin/analytics">
+                  Open analytics
+                </Link>
+              </div>
             </article>
             <article className="card placeholder-card">
               <h3>Court Analytics</h3>

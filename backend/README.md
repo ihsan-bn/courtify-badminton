@@ -29,6 +29,13 @@ Replace every secret and database value in `.env`. Production requires
 HTTPS-only CORS origins, and a numeric `TRUST_PROXY` hop count.
 `LOCK_CLEANUP_INTERVAL_MS` is optional and defaults to `60000`.
 
+Local transactional email configuration:
+
+```text
+EMAIL_PROVIDER=local
+EMAIL_FROM=no-reply@courtify.local
+```
+
 ## Commands
 
 ```powershell
@@ -347,6 +354,46 @@ contains the current instant, `upcoming_today` when the next active booking is
 later today, and `available` otherwise. Pending cancellations include
 `pending_admin_review`, `admin_verifying`, and `customer_contacted`. Manual
 refund workload includes only `refund_in_progress`.
+
+Get administrator analytics:
+
+```bash
+curl http://localhost:3001/api/admin/dashboard/analytics \
+  -H "Authorization: Bearer ADMIN_ACCESS_TOKEN"
+```
+
+The 30-day revenue and booking series use booking creation dates in
+`Asia/Brunei` and include `confirmed`, `cancellation_requested`, and
+`cancelled` records. Revenue additionally requires a stored Stripe
+PaymentIntent ID as the paid signal; locked and expired bookings are excluded.
+Revenue is gross paid booking value, so paid cancelled bookings remain in the
+historical revenue series. Day-of-week, popular-court, and peak-hour analytics
+use reservation timing. Peak hours expand multi-hour reservations into their
+individual occupied hours. Top-customer results expose only user ID, display
+name, booking count, and aggregate revenue; phone numbers and emails are never
+returned.
+
+## Transactional Email
+
+Apply `202606190001_add_email_delivery_metadata.sql` before enabling email
+delivery. The initial `local` provider writes a development email preview to
+the backend log. Provider access is isolated behind an email provider
+interface so SMTP or Resend can be added later without changing booking or
+cancellation workflows.
+
+Transactional emails are sent for booking confirmation, cancellation request
+receipt, cancellation approval, manual refund completion, and case closure.
+Each template includes responsive Courtify HTML and a plain-text fallback.
+
+`notification_events` stores idempotent delivery history using one key per
+booking and email type. Dispatch happens only after the related database
+transaction commits. Provider or history-write failures are logged
+server-side and never roll back booking confirmation, cancellation, refund, or
+case-closure operations.
+
+The administrator cancellation detail response exposes only email type,
+delivery status, attempt timestamp, and sent timestamp. Email bodies and
+provider errors are not included in the delivery-history response.
 
 ## Booking Engine Validation
 

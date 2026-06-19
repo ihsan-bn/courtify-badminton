@@ -5,6 +5,7 @@ import {
   requireAdmin
 } from "../../middleware/auth.js";
 import {
+  getDashboardAnalytics,
   getDashboardOperations,
   getDashboardSummary
 } from "./dashboard.controller.js";
@@ -23,4 +24,11 @@ adminDashboardRouter.get(
   authenticate,
   requireAdmin,
   getDashboardOperations
+);
+
+adminDashboardRouter.get(
+  "/analytics",
+  authenticate,
+  requireAdmin,
+  getDashboardAnalytics
 );

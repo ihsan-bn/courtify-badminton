@@ -40,6 +40,14 @@ const TIMELINE_LABELS: Record<string, string> = {
   close_case: "Case closed"
 };
 
+const EMAIL_TYPE_LABELS: Record<string, string> = {
+  booking_confirmation: "Booking confirmation",
+  cancellation_request_received: "Cancellation request received",
+  cancellation_approved: "Cancellation approved",
+  refund_completed: "Refund completed",
+  case_closed: "Case closed"
+};
+
 const REFUND_METHODS: RefundMethod[] = [
   "BIBD Transfer",
   "Baiduri Transfer",
@@ -353,6 +361,50 @@ export default function AdminCancellationDetailsPage() {
                   </strong>
                 </div>
               </div>
+            </section>
+
+            <section className="card admin-action-card">
+              <div className="booking-card-header">
+                <div>
+                  <span className="eyebrow">Transactional Email</span>
+                  <h2>Email delivery history</h2>
+                </div>
+                <span className="status-pill">
+                  {request.email_history.length}
+                </span>
+              </div>
+              {request.email_history.length === 0 ? (
+                <p className="empty-state">
+                  No transactional email attempts are recorded for this
+                  booking.
+                </p>
+              ) : (
+                <div className="operations-list">
+                  {request.email_history.map((email) => (
+                    <article
+                      className="operations-row"
+                      key={`${email.email_type}-${email.created_at}`}
+                    >
+                      <div>
+                        <strong>
+                          {EMAIL_TYPE_LABELS[email.email_type] ??
+                            formatStatus(email.email_type)}
+                        </strong>
+                        <p>
+                          {email.sent_at
+                            ? `Sent ${formatDateTime(email.sent_at)}`
+                            : `Attempted ${formatDateTime(email.created_at)}`}
+                        </p>
+                      </div>
+                      <span
+                        className={`status-pill email-status-${email.delivery_status}`}
+                      >
+                        {email.delivery_status}
+                      </span>
+                    </article>
+                  ))}
+                </div>
+              )}
             </section>
 
             <section className="card admin-action-card">

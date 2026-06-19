@@ -14,7 +14,8 @@ supabase/
 |   |-- 202606180002_add_cancellation_approved_status.sql
 |   |-- 202606180003_update_cancellation_review_constraint.sql
 |   |-- 202606180004_add_manual_refund_statuses.sql
-|   `-- 202606180005_add_manual_refund_fields.sql
+|   |-- 202606180005_add_manual_refund_fields.sql
+|   `-- 202606190001_add_email_delivery_metadata.sql
 `-- seed.sql
 ```
 

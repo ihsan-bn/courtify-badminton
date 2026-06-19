@@ -29,6 +29,7 @@ import {
   createBruneiSlotDateTime,
   type CreateBookingLockInput
 } from "./bookings.schemas.js";
+import { emailService } from "../email/email.service.js";
 
 interface BookingLockResult {
   booking_id: string;
@@ -153,6 +154,12 @@ interface AdminCancellationDetailResult
   refunded_by: string | null;
   slots: AdminCancellationSlot[];
   timeline: AdminCancellationEvent[];
+  email_history: {
+    email_type: string;
+    delivery_status: "pending" | "sent" | "failed";
+    sent_at: string | null;
+    created_at: string;
+  }[];
 }
 
 interface AdminCancellationActionResult {
@@ -376,6 +383,9 @@ function formatAdminCancellationDetail(
   slots: AdminCancellationSlotRecord[],
   timeline: Awaited<
     ReturnType<typeof bookingsRepository.findCancellationRequestEvents>
+  >,
+  emailHistory: Awaited<
+    ReturnType<typeof emailService.getBookingEmailHistory>
   >
 ): AdminCancellationDetailResult {
   return {
@@ -394,7 +404,8 @@ function formatAdminCancellationDetail(
       actor_type: event.actor_type,
       actor_user_id: event.actor_user_id,
       created_at: event.created_at.toISOString()
-    }))
+    })),
+    email_history: emailHistory
   };
 }
 
@@ -501,7 +512,7 @@ export const bookingsService = {
     bookingId: string,
     input: CancelBookingInput
   ): Promise<CancellationResult> {
-    return withTransaction(async (client) => {
+    const result = await withTransaction<CancellationResult>(async (client) => {
       const booking = await bookingsRepository.findBookingForCancellation(
         client,
         bookingId
@@ -594,6 +605,12 @@ export const bookingsService = {
         reason: input.reason ?? null
       };
     });
+
+    if (result.status === "cancellation_requested") {
+      await emailService.sendCancellationRequestReceived(result.booking_id);
+    }
+
+    return result;
   },
 
   async getCancellationRequests(): Promise<
@@ -612,12 +629,18 @@ export const bookingsService = {
       throw new NotFoundError("Cancellation request not found");
     }
 
-    const [slots, timeline] = await Promise.all([
+    const [slots, timeline, emailHistory] = await Promise.all([
       bookingsRepository.findCancellationRequestSlots(request.booking_id),
-      bookingsRepository.findCancellationRequestEvents(requestId)
+      bookingsRepository.findCancellationRequestEvents(requestId),
+      emailService.getBookingEmailHistory(request.booking_id)
     ]);
 
-    return formatAdminCancellationDetail(request, slots, timeline);
+    return formatAdminCancellationDetail(
+      request,
+      slots,
+      timeline,
+      emailHistory
+    );
   },
 
   async addCancellationAction(
@@ -625,7 +648,7 @@ export const bookingsService = {
     requestId: string,
     input: AdminCancellationActionInput
   ): Promise<AdminCancellationActionResult> {
-    return withTransaction(async (client) => {
+    const actionResult = await withTransaction(async (client) => {
       const request =
         await bookingsRepository.findCancellationRequestForUpdate(
           client,
@@ -876,5 +899,15 @@ export const bookingsService = {
       );
       return result(request.booking_status, "closed");
     });
+
+    if (input.action === "cancellation_approved") {
+      await emailService.sendCancellationApproved(actionResult.booking_id);
+    } else if (input.action === "refund_completed") {
+      await emailService.sendRefundCompleted(actionResult.booking_id);
+    } else if (input.action === "close_case") {
+      await emailService.sendCaseClosed(actionResult.booking_id);
+    }
+
+    return actionResult;
   }
 };

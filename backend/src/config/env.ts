@@ -31,7 +31,9 @@ const rawEnvSchema = z
         "Must be a valid Stripe webhook signing secret"
       ),
     STRIPE_SUCCESS_URL: z.string().url(),
-    STRIPE_CANCEL_URL: z.string().url()
+    STRIPE_CANCEL_URL: z.string().url(),
+    EMAIL_PROVIDER: z.literal("local").default("local"),
+    EMAIL_FROM: z.string().email().default("no-reply@courtify.local")
   });
 
 const parsed = rawEnvSchema.safeParse(process.env);
@@ -137,5 +139,7 @@ export const env = Object.freeze({
   stripeWebhookSecret: parsed.data.STRIPE_WEBHOOK_SECRET,
   stripeSuccessUrl: parsed.data.STRIPE_SUCCESS_URL,
   stripeCancelUrl: parsed.data.STRIPE_CANCEL_URL,
+  emailProvider: parsed.data.EMAIL_PROVIDER,
+  emailFrom: parsed.data.EMAIL_FROM.toLowerCase(),
   isProduction: parsed.data.NODE_ENV === "production"
 });

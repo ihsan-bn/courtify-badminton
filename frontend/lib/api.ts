@@ -190,6 +190,12 @@ export interface AdminCancellationDetail extends AdminCancellationQueueItem {
       actor_user_id: string | null;
     }
   >;
+  email_history: Array<{
+    email_type: string;
+    delivery_status: "pending" | "sent" | "failed";
+    sent_at: string | null;
+    created_at: string;
+  }>;
 }
 
 export type AdminCancellationAction =
@@ -274,6 +280,68 @@ export interface AdminDashboardOperations {
   upcoming_bookings: DashboardOperationsBooking[];
   pending_cancellations: DashboardPendingCancellation[];
   refunds_in_progress: DashboardRefundInProgress[];
+}
+
+export interface AnalyticsRevenuePoint {
+  date: string;
+  revenue_bnd: string;
+}
+
+export interface AnalyticsBookingPoint {
+  date: string;
+  booking_count: number;
+}
+
+export interface AnalyticsDayOfWeek {
+  day: string;
+  booking_count: number;
+  revenue_bnd: string;
+}
+
+export interface AnalyticsPopularCourt {
+  court_id: string;
+  court_name: string;
+  booking_count: number;
+  revenue_bnd: string;
+  total_hours: number;
+}
+
+export interface AnalyticsPeakHour {
+  start_hour: number;
+  label: string;
+  booking_count: number;
+}
+
+export interface AnalyticsTopCustomer {
+  user_id: string;
+  customer_name: string | null;
+  booking_count: number;
+  revenue_bnd: string;
+}
+
+export interface AdminDashboardAnalytics {
+  revenue_last_30_days: AnalyticsRevenuePoint[];
+  bookings_last_30_days: AnalyticsBookingPoint[];
+  bookings_by_day_of_week: AnalyticsDayOfWeek[];
+  revenue_by_day_of_week: AnalyticsDayOfWeek[];
+  popular_courts: AnalyticsPopularCourt[];
+  peak_booking_hours: AnalyticsPeakHour[];
+  top_customers: AnalyticsTopCustomer[];
+  cancellation_summary: {
+    pending_admin_review: number;
+    admin_verifying: number;
+    customer_contacted: number;
+    approved: number;
+    refund_in_progress: number;
+    refund_completed: number;
+    closed: number;
+    rejected: number;
+  };
+  refund_summary: {
+    refund_in_progress_count: number;
+    refund_completed_count: number;
+    closed_count: number;
+  };
 }
 
 export class ApiError extends Error {

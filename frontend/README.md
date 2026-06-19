@@ -24,6 +24,14 @@ STRIPE_SUCCESS_URL=http://localhost:3000/bookings/success
 STRIPE_CANCEL_URL=http://localhost:3000/bookings/cancelled
 ```
 
+## Authentication Session
+
+The JWT access token is stored in browser `localStorage` so the authenticated
+session survives the external Stripe Checkout redirect and return navigation.
+Existing tokens previously stored in `sessionStorage` are migrated
+automatically on first access. Logout clears the token from both storage
+locations. Tokens are never placed in URLs.
+
 ## Available Routes
 
 - `/` landing page
@@ -37,6 +45,7 @@ STRIPE_CANCEL_URL=http://localhost:3000/bookings/cancelled
 - `/bookings/cancelled` Stripe payment cancellation landing page
 - `/admin/cancellations` administrator cancellation request queue
 - `/admin/cancellations/[id]` administrator cancellation review and actions
+- `/admin/analytics` administrator booking and revenue analytics
 
 ## Booking Flow
 
@@ -81,6 +90,11 @@ and internal notes, then close the case. Customers see refund date, method,
 and reference but never see internal admin notes. Stripe automated refunds are
 not used.
 
+The cancellation detail page also displays transactional email delivery
+history for the booking, including email type, delivery status, and sent or
+attempted timestamp. Advanced delivery tracking and email content previews are
+not exposed in the frontend.
+
 ## Executive KPI Dashboard
 
 Administrator accounts use `/dashboard` as an executive summary. It calls
@@ -96,6 +110,12 @@ pending cancellation reviews, and manual refunds in progress. Cancellation
 and refund rows link to their administrator case detail page. Booking rows show
 their database booking reference until a dedicated admin booking-detail route
 is introduced.
+
+The `/admin/analytics` page calls `GET /api/admin/dashboard/analytics` and uses
+CSS-only bars, responsive tables, and stat lists for 30-day revenue and booking
+trends, weekday performance, popular courts, peak hours, top customers,
+cancellation workflow totals, and manual refund totals. No customer phone or
+email data is displayed.
 
 ## Stripe Checkout Flow
 
@@ -117,4 +137,4 @@ npm run lint
 ```
 
 This frontend intentionally does not include notification delivery, calendar
-invites, or dashboard analytics yet.
+invites, exports, or deployment configuration.

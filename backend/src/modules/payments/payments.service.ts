@@ -11,6 +11,7 @@ import {
   NotFoundError
 } from "../../utils/errors.js";
 import { bookingsRepository } from "../bookings/bookings.repository.js";
+import { emailService } from "../email/email.service.js";
 import { paymentsRepository } from "./payments.repository.js";
 import type {
   CreateCheckoutSessionInput,
@@ -428,7 +429,8 @@ export const paymentsService = {
       return;
     }
 
-    await withTransaction(async (client) => {
+    const confirmedBookingId: string | null = await withTransaction(
+      async (client) => {
       const claimed = await paymentsRepository.claimPaymentEvent(
         client,
         event.id,
@@ -436,7 +438,7 @@ export const paymentsService = {
         event
       );
       if (!claimed) {
-        return;
+        return null;
       }
 
       if (event.type === "refund.updated") {
@@ -448,7 +450,7 @@ export const paymentsService = {
         );
         if (!refundRecord) {
           console.warn(`Stripe refund ${refund.id} has no local refund record`);
-          return;
+          return null;
         }
 
         await paymentsRepository.attachPaymentEventToBooking(
@@ -463,7 +465,7 @@ export const paymentsService = {
           mapStripeRefundStatus(refund.status),
           refund.failure_reason ?? null
         );
-        return;
+        return null;
       }
 
       if (event.type === "charge.refunded") {
@@ -474,7 +476,7 @@ export const paymentsService = {
             : charge.payment_intent?.id;
         if (!paymentIntentId) {
           console.warn(`Refunded Stripe charge ${charge.id} has no payment intent`);
-          return;
+          return null;
         }
 
         const refundRecord =
@@ -486,7 +488,7 @@ export const paymentsService = {
           console.warn(
             `Refunded Stripe charge ${charge.id} has no local refund record`
           );
-          return;
+          return null;
         }
 
         await paymentsRepository.attachPaymentEventToBooking(
@@ -499,7 +501,7 @@ export const paymentsService = {
           refundRecord.id,
           charge.amount_refunded
         );
-        return;
+        return null;
       }
 
       if (event.type === "payment_intent.payment_failed") {
@@ -535,7 +537,7 @@ export const paymentsService = {
             booking.id
           );
         }
-        return;
+        return null;
       }
 
       if (event.type === "payment_intent.succeeded") {
@@ -551,7 +553,7 @@ export const paymentsService = {
             booking.id
           );
         }
-        return;
+        return null;
       }
 
       const checkoutSession = event.data.object;
@@ -565,7 +567,7 @@ export const paymentsService = {
         console.warn(
           `Stripe checkout session ${checkoutSession.id} has no booking`
         );
-        return;
+        return null;
       }
 
       await paymentsRepository.attachPaymentEventToBooking(
@@ -585,7 +587,7 @@ export const paymentsService = {
             booking.id
           );
         }
-        return;
+        return null;
       }
 
       const expectedAmountCents = convertBndToCents(
@@ -600,7 +602,7 @@ export const paymentsService = {
         console.warn(
           `Stripe checkout session ${checkoutSession.id} failed payment validation`
         );
-        return;
+        return null;
       }
 
       const paymentCompletedAt = new Date(event.created * 1000);
@@ -612,7 +614,7 @@ export const paymentsService = {
         console.warn(
           `Booking ${booking.id} is not eligible for Stripe confirmation`
         );
-        return;
+        return null;
       }
 
       const paymentIntentId =
@@ -624,7 +626,7 @@ export const paymentsService = {
         console.warn(
           `Stripe checkout session ${checkoutSession.id} has no payment intent`
         );
-        return;
+        return null;
       }
 
       const confirmed = await paymentsRepository.confirmBooking(
@@ -637,7 +639,7 @@ export const paymentsService = {
         console.warn(
           `Booking ${booking.id} expired before Stripe confirmation`
         );
-        return;
+        return null;
       }
 
       const expectedSlotCount =
@@ -651,6 +653,13 @@ export const paymentsService = {
           `Booking ${booking.id} slot confirmation count mismatch`
         );
       }
-    });
+
+        return booking.id;
+      }
+    );
+
+    if (confirmedBookingId) {
+      await emailService.sendBookingConfirmation(confirmedBookingId);
+    }
   }
 };
