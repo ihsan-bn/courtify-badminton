@@ -23,7 +23,7 @@ export default function RegisterPage() {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [otpRequested, setOtpRequested] = useState(false);
-  const [devOtp, setDevOtp] = useState<string | null>(null);
+  const [demoOtp, setDemoOtp] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState<LoadingAction | null>(null);
@@ -32,7 +32,7 @@ export default function RegisterPage() {
     event.preventDefault();
     setError(null);
     setMessage(null);
-    setDevOtp(null);
+    setDemoOtp(null);
     setLoading("request-otp");
 
     try {
@@ -45,7 +45,7 @@ export default function RegisterPage() {
       );
       setOtpRequested(true);
       setMessage(`OTP sent. It expires in ${result.expires_in_seconds / 60} minutes.`);
-      setDevOtp(result.otp ?? null);
+      setDemoOtp(result.otp ?? null);
     } catch (caught) {
       setError(
         caught instanceof ApiError
@@ -138,6 +138,19 @@ export default function RegisterPage() {
         </form>
       ) : (
         <form className="form-card" onSubmit={completeRegistration}>
+          {demoOtp ? (
+            <section
+              className="demo-otp-card"
+              aria-label="Demo Mode generated OTP"
+              role="status"
+            >
+              <h2>Demo Mode</h2>
+              <p>
+                Generated OTP: <strong>{demoOtp}</strong>
+              </p>
+              <p>Use this OTP to continue.</p>
+            </section>
+          ) : null}
           <div className="field">
             <label htmlFor="registration-otp">Six-digit OTP</label>
             <input
@@ -225,7 +238,7 @@ export default function RegisterPage() {
             onClick={() => {
               setOtpRequested(false);
               setOtp("");
-              setDevOtp(null);
+              setDemoOtp(null);
               setMessage(null);
               setError(null);
             }}
@@ -238,11 +251,6 @@ export default function RegisterPage() {
       {message ? (
         <p className="notice" role="status">
           {message}
-        </p>
-      ) : null}
-      {devOtp ? (
-        <p className="notice" role="status">
-          Local testing OTP: <strong>{devOtp}</strong>
         </p>
       ) : null}
       {error ? (

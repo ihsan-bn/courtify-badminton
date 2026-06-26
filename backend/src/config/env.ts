@@ -11,6 +11,7 @@ const rawEnvSchema = z
     JWT_EXPIRES_IN: z.string().regex(durationPattern),
     CORS_ALLOWED_ORIGINS: z.string().min(1),
     OTP_PEPPER: z.string().min(32),
+    DEMO_MODE: z.enum(["true", "false"]).default("false"),
     TRUST_PROXY: z.string().regex(/^(false|true|[1-9]\d*)$/),
     LOCK_CLEANUP_INTERVAL_MS: z
       .string()
@@ -133,6 +134,7 @@ export const env = Object.freeze({
   jwtExpiresIn: parsed.data.JWT_EXPIRES_IN,
   corsAllowedOrigins,
   otpPepper: parsed.data.OTP_PEPPER,
+  demoMode: parsed.data.DEMO_MODE === "true",
   trustProxy,
   lockCleanupIntervalMs: parsed.data.LOCK_CLEANUP_INTERVAL_MS ?? 60_000,
   stripeSecretKey: parsed.data.STRIPE_SECRET_KEY,

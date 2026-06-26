@@ -184,7 +184,7 @@ export const authService = {
     return {
       message: "OTP generated",
       expires_in_seconds: 300,
-      ...(!env.isProduction ? { otp } : {})
+      ...(env.demoMode ? { otp } : {})
     };
   },
 
@@ -231,7 +231,7 @@ export const authService = {
     return {
       message: "OTP generated",
       expires_in_seconds: 300,
-      ...(!env.isProduction ? { otp } : {})
+      ...(env.demoMode ? { otp } : {})
     };
   },
 
@@ -326,7 +326,7 @@ export const authService = {
     return {
       message: "OTP generated",
       expires_in_seconds: 300,
-      ...(!env.isProduction ? { otp } : {})
+      ...(env.demoMode ? { otp } : {})
     };
   },
 

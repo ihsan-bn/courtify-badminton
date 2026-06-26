@@ -97,6 +97,22 @@ Stripe webhook forwarding is still required for local payment testing:
 stripe listen --forward-to localhost:4000/api/payments/webhook
 ```
 
+## Demo Mode OTP Display
+
+Phase 1 client demo environments may set this backend environment variable:
+
+```text
+DEMO_MODE=true
+```
+
+When `DEMO_MODE=true`, registration and login OTP endpoints still generate,
+store, expire, and validate OTPs normally, but the API response also includes
+the generated OTP so the frontend can show it on screen. This is intended only
+for Phase 1 demos.
+
+For real production, set `DEMO_MODE=false` or omit it entirely. Real
+production must not expose OTP values in API responses or on screen.
+
 ## Local Auth Test Account
 
 The seeded local administrator is for development only:

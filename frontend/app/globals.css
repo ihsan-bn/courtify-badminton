@@ -1027,6 +1027,33 @@ a:focus-visible {
   overflow-wrap: anywhere;
 }
 
+.demo-otp-card {
+  display: grid;
+  gap: 0.35rem;
+  border: 1px solid #f59e0b;
+  border-radius: 1rem;
+  padding: 1rem;
+  color: #78350f;
+  background: #fffbeb;
+  overflow-wrap: anywhere;
+}
+
+.demo-otp-card h2,
+.demo-otp-card p {
+  margin: 0;
+}
+
+.demo-otp-card h2 {
+  font-size: 1rem;
+  line-height: 1.3;
+}
+
+.demo-otp-card strong {
+  color: #111827;
+  font-size: 1.1rem;
+  letter-spacing: 0;
+}
+
 .field {
   display: grid;
   gap: 0.45rem;

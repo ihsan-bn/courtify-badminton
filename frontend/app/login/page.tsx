@@ -22,7 +22,7 @@ export default function LoginPage() {
   const [otpChannel, setOtpChannel] = useState<OtpChannel>("email");
   const [otp, setOtp] = useState("");
   const [otpRequested, setOtpRequested] = useState(false);
-  const [devOtp, setDevOtp] = useState<string | null>(null);
+  const [demoOtp, setDemoOtp] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState<LoadingAction | null>(null);
@@ -40,7 +40,7 @@ export default function LoginPage() {
     event.preventDefault();
     setError(null);
     setMessage(null);
-    setDevOtp(null);
+    setDemoOtp(null);
     setLoading("request-email");
 
     try {
@@ -62,7 +62,7 @@ export default function LoginPage() {
       setMessage(
         `Password accepted. OTP sent by ${otpChannel.toUpperCase()} and expires in ${result.expires_in_seconds / 60} minutes.`
       );
-      setDevOtp(result.otp ?? null);
+      setDemoOtp(result.otp ?? null);
     } catch (caught) {
       setError(
         caught instanceof ApiError
@@ -202,6 +202,19 @@ export default function LoginPage() {
               <p className="account-confirmation">
                 Completing login for <strong>{email}</strong>
               </p>
+              {demoOtp ? (
+                <section
+                  className="demo-otp-card"
+                  aria-label="Demo Mode generated OTP"
+                  role="status"
+                >
+                  <h2>Demo Mode</h2>
+                  <p>
+                    Generated OTP: <strong>{demoOtp}</strong>
+                  </p>
+                  <p>Use this OTP to continue.</p>
+                </section>
+              ) : null}
               <div className="field">
                 <label htmlFor="email-otp">Six-digit OTP</label>
                 <input
@@ -231,7 +244,7 @@ export default function LoginPage() {
                 onClick={() => {
                   setOtpRequested(false);
                   setOtp("");
-                  setDevOtp(null);
+                  setDemoOtp(null);
                   setMessage(null);
                   setError(null);
                 }}
@@ -246,11 +259,6 @@ export default function LoginPage() {
       {message ? (
         <p className="notice" role="status">
           {message}
-        </p>
-      ) : null}
-      {devOtp ? (
-        <p className="notice" role="status">
-          Local testing OTP: <strong>{devOtp}</strong>
         </p>
       ) : null}
       {error ? (

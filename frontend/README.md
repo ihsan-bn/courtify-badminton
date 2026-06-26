@@ -42,6 +42,13 @@ The public `/login` page clearly separates:
 The password exists only in the login form's in-memory state and is cleared
 after the OTP challenge is created. It is never stored by the frontend.
 
+For Phase 1 client demos, the backend may be configured with
+`DEMO_MODE=true`. When an OTP API response includes `otp`, the login and
+registration pages show a Demo Mode card with the generated OTP above the OTP
+input. The frontend does not hardcode demo mode; if the backend does not
+return `otp`, the UI behaves normally. Real production must use
+`DEMO_MODE=false` or omit it so OTP values are not exposed on screen.
+
 Authenticated pages share a global Courtify-Badminton header. It displays
 initials, the user's name or contact fallback, email or phone identity, and an
 explicit administrator/customer badge. The account menu includes Update

@@ -29,6 +29,18 @@ Replace every secret and database value in `.env`. Production requires
 HTTPS-only CORS origins, and a numeric `TRUST_PROXY` hop count.
 `LOCK_CLEANUP_INTERVAL_MS` is optional and defaults to `60000`.
 
+Demo environments for Phase 1 client demos may set:
+
+```text
+DEMO_MODE=true
+```
+
+With `DEMO_MODE=true`, registration and login OTP endpoints still generate,
+store, expire, and validate OTPs normally, and email/local provider behavior
+is unchanged. The API additionally returns the generated OTP so the frontend
+can display it on screen. Set `DEMO_MODE=false` or omit it for real
+production. Real production must not expose OTP values in API responses.
+
 Local transactional email configuration:
 
 ```text
@@ -66,8 +78,9 @@ curl -X POST http://localhost:3001/api/auth/registration/request-otp \
   -d '{"phone_number":"+6738123456"}'
 ```
 
-Development and test environments include the OTP in this response. Production
-never returns it.
+Only environments with `DEMO_MODE=true` include the OTP in this response.
+Real production with `DEMO_MODE=false` or a missing `DEMO_MODE` never returns
+it.
 
 Complete registration by verifying the phone OTP and setting name, email, and
 password:
@@ -89,8 +102,10 @@ curl -X POST http://localhost:3001/api/auth/request-email-password-otp \
 
 Wrong or unavailable credentials return the same safe
 `Invalid email or password.` response. The endpoint is rate limited. In
-development and test, the successful response includes or logs the generated
-OTP/reset link; in production it never returns OTPs in API responses.
+Phase 1 demo environments with `DEMO_MODE=true`, the successful response
+includes the generated OTP for on-screen display. Real production with
+`DEMO_MODE=false` or a missing `DEMO_MODE` never returns OTPs in API
+responses. Password reset tokens are not returned in any API response.
 
 Verify the email-login OTP:
 
