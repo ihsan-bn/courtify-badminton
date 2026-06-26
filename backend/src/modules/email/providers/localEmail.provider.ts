@@ -18,7 +18,13 @@ export class LocalEmailProvider implements EmailProvider {
         to: message.to,
         from: message.from,
         subject: message.subject,
-        text: message.text
+        text: message.text,
+        attachments:
+          message.attachments?.map((attachment) => ({
+            filename: attachment.filename,
+            content_type: attachment.contentType,
+            message: "Attachment would be sent by a real email provider"
+          })) ?? []
       })
     );
 

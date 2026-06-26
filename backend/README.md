@@ -48,6 +48,22 @@ EMAIL_PROVIDER=local
 EMAIL_FROM=no-reply@courtify.local
 ```
 
+Resend transactional email configuration:
+
+```text
+EMAIL_PROVIDER=resend
+RESEND_API_KEY=<secret>
+EMAIL_FROM=Courtify <onboarding@resend.dev>
+```
+
+`RESEND_API_KEY` is required only when `EMAIL_PROVIDER=resend`. It is never
+logged. `EMAIL_FROM` accepts either a plain email address or a display-name
+sender in `Name <email>` format. `DEMO_MODE=true` still returns OTPs in API
+responses for Phase 1 demos, but it does not disable Resend/local email
+delivery. With `DEMO_MODE=false` or a missing `DEMO_MODE`, OTPs are never
+returned in API responses and must be delivered through the configured
+channel/provider.
+
 ## Commands
 
 ```powershell
@@ -472,14 +488,26 @@ returned.
 ## Transactional Email
 
 Apply `202606190001_add_email_delivery_metadata.sql` before enabling email
-delivery. The initial `local` provider writes a development email preview to
-the backend log. Provider access is isolated behind an email provider
-interface so SMTP or Resend can be added later without changing booking or
-cancellation workflows.
+delivery. `EMAIL_PROVIDER=local` writes a development email preview to the
+backend log. `EMAIL_PROVIDER=resend` sends through the official Resend Node
+SDK using `RESEND_API_KEY`. Provider access is isolated behind an email
+provider interface so future providers can be added without changing booking
+or cancellation workflows.
 
-Transactional emails are sent for booking confirmation, cancellation request
-receipt, cancellation approval, manual refund completion, and case closure.
-Each template includes responsive Courtify HTML and a plain-text fallback.
+Transactional templates exist for registration OTP, login OTP, password reset,
+booking confirmation, cancellation request receipt, cancellation approval,
+manual refund completion, and case closure. The registration OTP flow still
+starts from a phone number, so it does not send email unless an email delivery
+path is added for that flow. Each template includes branded
+Courtify-Badminton HTML and a plain-text fallback. Customer emails never
+include admin-private refund notes.
+
+Booking confirmation emails attach an RFC5545 `.ics` calendar invitation only
+after the booking is confirmed. The invite uses `Asia/Brunei` booking times,
+includes a 30-minute reminder, and is compatible with Google Calendar, Apple
+Calendar, Outlook, and mobile calendars. The Resend provider sends the
+attachment as `courtify-booking-BOOKING_ID.ics`; the local provider logs that
+the invite would be attached without dumping the full ICS content.
 
 `notification_events` stores idempotent delivery history using one key per
 booking and email type. Dispatch happens only after the related database

@@ -1,6 +1,9 @@
 import { z } from "zod";
 
 const durationPattern = /^\d+(ms|s|m|h|d)$/;
+const emailAddressPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const emailFromPattern =
+  /^(?:[^<>\r\n"]+ <[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+>|[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+)$/;
 
 const rawEnvSchema = z
   .object({
@@ -33,8 +36,12 @@ const rawEnvSchema = z
       ),
     STRIPE_SUCCESS_URL: z.string().url(),
     STRIPE_CANCEL_URL: z.string().url(),
-    EMAIL_PROVIDER: z.literal("local").default("local"),
-    EMAIL_FROM: z.string().email().default("no-reply@courtify.local")
+    EMAIL_PROVIDER: z.enum(["local", "resend"]).default("local"),
+    RESEND_API_KEY: z.string().min(1).optional(),
+    EMAIL_FROM: z
+      .string()
+      .regex(emailFromPattern, "Must be an email address or Name <email>")
+      .default("no-reply@courtify.local")
   });
 
 const parsed = rawEnvSchema.safeParse(process.env);
@@ -44,6 +51,16 @@ if (!parsed.success) {
     .map((issue) => `${issue.path.join(".")}: ${issue.message}`)
     .join("; ");
   throw new Error(`Invalid environment configuration: ${details}`);
+}
+
+if (parsed.data.EMAIL_PROVIDER === "resend" && !parsed.data.RESEND_API_KEY) {
+  throw new Error("RESEND_API_KEY is required when EMAIL_PROVIDER=resend");
+}
+
+const fromAddressMatch = /<([^<>]+)>$/.exec(parsed.data.EMAIL_FROM);
+const fromAddress = fromAddressMatch?.[1] ?? parsed.data.EMAIL_FROM;
+if (!emailAddressPattern.test(fromAddress)) {
+  throw new Error("EMAIL_FROM must contain a valid sender email address");
 }
 
 const databaseUrl = new URL(parsed.data.DATABASE_URL);
@@ -142,6 +159,7 @@ export const env = Object.freeze({
   stripeSuccessUrl: parsed.data.STRIPE_SUCCESS_URL,
   stripeCancelUrl: parsed.data.STRIPE_CANCEL_URL,
   emailProvider: parsed.data.EMAIL_PROVIDER,
-  emailFrom: parsed.data.EMAIL_FROM.toLowerCase(),
+  resendApiKey: parsed.data.RESEND_API_KEY,
+  emailFrom: parsed.data.EMAIL_FROM,
   isProduction: parsed.data.NODE_ENV === "production"
 });

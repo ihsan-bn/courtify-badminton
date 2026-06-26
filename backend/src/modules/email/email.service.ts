@@ -1,18 +1,26 @@
 import { env } from "../../config/env.js";
+import { createBookingCalendarInvite } from "../../utils/ics.js";
 import { emailRepository } from "./email.repository.js";
 import { emailTemplates } from "./email.templates.js";
 import type {
+  EmailAttachment,
   EmailEventType,
   EmailProvider,
   EmailTemplate
 } from "./email.types.js";
 import { LocalEmailProvider } from "./providers/localEmail.provider.js";
+import { ResendEmailProvider } from "./providers/resendEmail.provider.js";
 import { auditService } from "../audit/audit.service.js";
 
-const providers: Record<typeof env.emailProvider, EmailProvider> = {
-  local: new LocalEmailProvider()
-};
-const provider = providers[env.emailProvider];
+function createProvider(): EmailProvider {
+  if (env.emailProvider === "resend") {
+    return new ResendEmailProvider(env.resendApiKey ?? "");
+  }
+
+  return new LocalEmailProvider();
+}
+
+const provider = createProvider();
 
 function getFrontendOrigin(): string {
   return env.corsAllowedOrigins[0] ?? "http://localhost:3000";
@@ -29,7 +37,12 @@ async function dispatch(
     context: NonNullable<
       Awaited<ReturnType<typeof emailRepository.findBookingContext>>
     >
-  ) => EmailTemplate
+  ) => EmailTemplate,
+  attachmentFactory?: (
+    context: NonNullable<
+      Awaited<ReturnType<typeof emailRepository.findBookingContext>>
+    >
+  ) => EmailAttachment[]
 ): Promise<void> {
   let notificationEventId: string | null = null;
 
@@ -49,6 +62,7 @@ async function dispatch(
 
     const recipientEmail = context.customer_email.toLowerCase();
     const template = templateFactory(context);
+    const attachments = attachmentFactory?.(context);
     notificationEventId = await emailRepository.claimEmailEvent(
       bookingId,
       eventType,
@@ -65,7 +79,8 @@ async function dispatch(
       from: env.emailFrom,
       subject: template.subject,
       html: template.html,
-      text: template.text
+      text: template.text,
+      ...(attachments ? { attachments } : {})
     });
     await emailRepository.markEmailSent(
       notificationEventId,
@@ -137,13 +152,13 @@ export const emailService = {
     otp: string;
     name: string | null;
   }): Promise<void> {
-    const greeting = name ? `Hi ${name},` : "Hi,";
+    const template = emailTemplates.loginOtp({ otp, name });
     await provider.send({
       to: to.toLowerCase(),
       from: env.emailFrom,
-      subject: "Your Courtify-Badminton login OTP",
-      html: `<p>${greeting}</p><p>Your Courtify-Badminton OTP is <strong>${otp}</strong>. It expires in 5 minutes.</p>`,
-      text: `${greeting}\n\nYour Courtify-Badminton OTP is ${otp}. It expires in 5 minutes.`
+      subject: template.subject,
+      html: template.html,
+      text: template.text
     });
   },
 
@@ -157,13 +172,13 @@ export const emailService = {
     name: string | null;
   }): Promise<void> {
     const resetUrl = `${getFrontendOrigin()}/reset-password?token=${encodeURIComponent(token)}`;
-    const greeting = name ? `Hi ${name},` : "Hi,";
+    const template = emailTemplates.passwordReset({ resetUrl, name });
     await provider.send({
       to: to.toLowerCase(),
       from: env.emailFrom,
-      subject: "Reset your Courtify-Badminton password",
-      html: `<p>${greeting}</p><p>Use this secure link to reset your password. It expires in 30 minutes:</p><p><a href="${resetUrl}">${resetUrl}</a></p>`,
-      text: `${greeting}\n\nUse this secure link to reset your password. It expires in 30 minutes:\n${resetUrl}`
+      subject: template.subject,
+      html: template.html,
+      text: template.text
     });
 
     if (!env.isProduction) {
@@ -185,26 +200,44 @@ export const emailService = {
     to: string;
     name: string | null;
   }): Promise<void> {
-    const greeting = name ? `Hi ${name},` : "Hi,";
+    const template = emailTemplates.passwordChanged({ name });
     await provider.send({
       to: to.toLowerCase(),
       from: env.emailFrom,
-      subject: "Your Courtify-Badminton password was changed",
-      html: `<p>${greeting}</p><p>Your Courtify-Badminton password was changed. If this was not you, contact the court administrator immediately.</p>`,
-      text: `${greeting}\n\nYour Courtify-Badminton password was changed. If this was not you, contact the court administrator immediately.`
+      subject: template.subject,
+      html: template.html,
+      text: template.text
     });
   },
 
   async sendBookingConfirmation(bookingId: string): Promise<void> {
-    await dispatch(bookingId, "booking_confirmation", (context) =>
-      emailTemplates.bookingConfirmation({
-        bookingId: context.booking_id,
-        courtName: context.court_name,
-        reservationStartAt: context.reservation_start_at,
-        reservationEndAt: context.reservation_end_at,
-        totalAmountBnd: context.total_amount_bnd,
-        bookingStatus: context.booking_status
-      })
+    await dispatch(
+      bookingId,
+      "booking_confirmation",
+      (context) =>
+        emailTemplates.bookingConfirmation({
+          bookingId: context.booking_id,
+          courtName: context.court_name,
+          reservationStartAt: context.reservation_start_at,
+          reservationEndAt: context.reservation_end_at,
+          totalAmountBnd: context.total_amount_bnd,
+          bookingStatus: context.booking_status
+        }),
+      (context) => [
+        {
+          filename: `courtify-booking-${context.booking_id}.ics`,
+          content: createBookingCalendarInvite({
+            bookingId: context.booking_id,
+            courtName: context.court_name,
+            customerEmail: context.customer_email,
+            organizerEmail: env.emailFrom,
+            reservationStartAt: context.reservation_start_at,
+            reservationEndAt: context.reservation_end_at,
+            totalAmountBnd: context.total_amount_bnd
+          }),
+          contentType: "text/calendar; charset=UTF-8; method=REQUEST"
+        }
+      ]
     );
   },
 

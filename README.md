@@ -31,7 +31,7 @@ v0.9A.1 - Auth and Account Management Redesign
 - Database: PostgreSQL/Supabase
 - Payments: Stripe Checkout and Stripe webhooks
 - Auth: bcrypt password hashes, OTP challenges, JWT access tokens
-- Email: local development provider behind a provider interface
+- Email: local development provider or Resend transactional delivery
 
 ## Project Structure
 
@@ -112,6 +112,32 @@ for Phase 1 demos.
 
 For real production, set `DEMO_MODE=false` or omit it entirely. Real
 production must not expose OTP values in API responses or on screen.
+
+## Transactional Email
+
+Local development can keep:
+
+```text
+EMAIL_PROVIDER=local
+EMAIL_FROM=no-reply@courtify.local
+```
+
+Demo and production environments can use Resend:
+
+```text
+EMAIL_PROVIDER=resend
+RESEND_API_KEY=<secret>
+EMAIL_FROM=Courtify <onboarding@resend.dev>
+```
+
+`DEMO_MODE=true` only controls whether generated OTPs are also returned in API
+responses for Phase 1 demos. It does not disable configured email delivery.
+With `DEMO_MODE=false` or a missing `DEMO_MODE`, OTPs are never returned in
+API responses and must be delivered through the configured channel/provider.
+
+Booking confirmation emails include a `.ics` calendar invite after payment
+confirmation. Customers can add the booking to Google Calendar, Apple
+Calendar, Outlook, and mobile calendars from that attachment.
 
 ## Local Auth Test Account
 
